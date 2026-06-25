@@ -9,6 +9,7 @@ import com.example.ringtoneid.domain.repository.RingtoneRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,33 +35,43 @@ class RingtoneRepositoryImpl @Inject constructor(
         try {
             val uri = Uri.parse(audioFilePath)
             context.contentResolver.delete(uri, null, null)
-        } catch (_: Exception) {
-            // File may already be deleted or URI invalid
-        }
+        } catch (_: Exception) {}
     }
 
-    private fun RingtoneEntity.toDomain() = RingtoneProfile(
-        id = id,
-        contactId = contactId,
-        contactName = contactName,
-        phoneNumber = phoneNumber,
-        notes = notes.removePrefix("[").removeSuffix("]")
-            .split(",").mapNotNull { it.trim().toIntOrNull() },
-        seed = seed,
-        noteCount = noteCount,
-        audioFilePath = audioFilePath,
-        createdAt = createdAt
-    )
+    private fun RingtoneEntity.toDomain(): RingtoneProfile {
+        val props = try {
+            val json = JSONObject(properties)
+            json.keys().asSequence().associateWith { json.getString(it) }
+        } catch (_: Exception) { emptyMap() }
 
-    private fun RingtoneProfile.toEntity() = RingtoneEntity(
-        id = id,
-        contactId = contactId,
-        contactName = contactName,
-        phoneNumber = phoneNumber,
-        notes = "[${notes.joinToString(",")}]",
-        seed = seed,
-        noteCount = noteCount,
-        audioFilePath = audioFilePath,
-        createdAt = createdAt
-    )
+        return RingtoneProfile(
+            id = id,
+            contactId = contactId,
+            contactName = contactName,
+            phoneNumber = phoneNumber,
+            notes = notes.removePrefix("[").removeSuffix("]")
+                .split(",").mapNotNull { it.trim().toIntOrNull() },
+            seed = seed,
+            noteCount = noteCount,
+            audioFilePath = audioFilePath,
+            createdAt = createdAt,
+            properties = props
+        )
+    }
+
+    private fun RingtoneProfile.toEntity(): RingtoneEntity {
+        val json = JSONObject(properties).toString()
+        return RingtoneEntity(
+            id = id,
+            contactId = contactId,
+            contactName = contactName,
+            phoneNumber = phoneNumber,
+            notes = "[${notes.joinToString(",")}]",
+            seed = seed,
+            noteCount = noteCount,
+            properties = json,
+            audioFilePath = audioFilePath,
+            createdAt = createdAt
+        )
+    }
 }

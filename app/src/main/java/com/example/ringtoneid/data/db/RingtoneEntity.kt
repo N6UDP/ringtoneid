@@ -12,6 +12,7 @@ data class RingtoneEntity(
     val notes: String,   // JSON array of ints, e.g. "[60,62,64]"
     val seed: Int = 0,
     val noteCount: Int = 8,
+    val properties: String = "{}",  // JSON object for extensible settings
     val audioFilePath: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )

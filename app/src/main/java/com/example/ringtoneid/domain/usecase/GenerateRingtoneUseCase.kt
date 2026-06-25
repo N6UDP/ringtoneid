@@ -8,7 +8,7 @@ import javax.inject.Inject
 class GenerateRingtoneUseCase @Inject constructor(
     private val generator: RingtoneGenerator
 ) {
-    operator fun invoke(contact: Contact, seed: Int = 0, noteCount: Int = 8): RingtoneProfile {
+    operator fun invoke(contact: Contact, seed: Int = 0, noteCount: Int = 8, format: String = "wav", midiProgram: Int = 0): RingtoneProfile {
         val notes = generator.phoneNumberToNotes(contact.phoneNumber, seed, noteCount)
         return RingtoneProfile(
             contactId = contact.id,
@@ -16,7 +16,11 @@ class GenerateRingtoneUseCase @Inject constructor(
             phoneNumber = contact.phoneNumber,
             notes = notes,
             seed = seed,
-            noteCount = noteCount
+            noteCount = noteCount,
+            properties = mutableMapOf<String, String>().apply {
+                put("format", format)
+                if (midiProgram != 0) put("midiProgram", midiProgram.toString())
+            }
         )
     }
 }

@@ -3,6 +3,7 @@ package com.example.ringtoneid.ui.detail
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ringtoneid.audio.AudioOutputFormat
 import com.example.ringtoneid.audio.RingtoneGenerator
 import com.example.ringtoneid.domain.model.Contact
 import com.example.ringtoneid.domain.model.RingtoneProfile
@@ -52,7 +53,13 @@ class RingtoneDetailViewModel @Inject constructor(
                 return@launch
             }
             val existingProfile = ringtoneRepository.getRingtoneForContact(contactId)
-            val profile = existingProfile ?: generateRingtoneUseCase(contact)
+            val profile = existingProfile ?: run {
+                val prefs = context.getSharedPreferences("ringtone_id_prefs", Context.MODE_PRIVATE)
+                val defaultFormat = prefs.getString("default_format", "wav") ?: "wav"
+                val defaultInstrument = prefs.getInt("default_instrument", 0)
+                val defaultLength = prefs.getInt("default_length", 8)
+                generateRingtoneUseCase(contact, format = defaultFormat, midiProgram = defaultInstrument, noteCount = defaultLength)
+            }
             _uiState.value = DetailUiState.Ready(contact = contact, profile = profile)
         }
     }
@@ -60,15 +67,39 @@ class RingtoneDetailViewModel @Inject constructor(
     fun shuffleSeed() {
         val state = _uiState.value as? DetailUiState.Ready ?: return
         ringtoneGenerator.stopPreview()
-        val newSeed = state.profile.seed + 1
-        val newProfile = generateRingtoneUseCase(state.contact, newSeed, state.profile.noteCount)
+        val p = state.profile
+        val newProfile = generateRingtoneUseCase(state.contact, p.seed + 1, p.noteCount, p.format, p.midiProgram)
+        _uiState.value = state.copy(profile = newProfile, isPlaying = false, savedSuccess = false, error = null)
+    }
+
+    fun prevSeed() {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        if (state.profile.seed <= 0) return
+        ringtoneGenerator.stopPreview()
+        val p = state.profile
+        val newProfile = generateRingtoneUseCase(state.contact, p.seed - 1, p.noteCount, p.format, p.midiProgram)
         _uiState.value = state.copy(profile = newProfile, isPlaying = false, savedSuccess = false, error = null)
     }
 
     fun updateNoteCount(count: Int) {
         val state = _uiState.value as? DetailUiState.Ready ?: return
         ringtoneGenerator.stopPreview()
-        val newProfile = generateRingtoneUseCase(state.contact, state.profile.seed, count)
+        val p = state.profile
+        val newProfile = generateRingtoneUseCase(state.contact, p.seed, count, p.format, p.midiProgram)
+        _uiState.value = state.copy(profile = newProfile, isPlaying = false, savedSuccess = false, error = null)
+    }
+
+    fun updateFormat(format: String) {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        ringtoneGenerator.stopPreview()
+        val newProfile = state.profile.withFormat(format)
+        _uiState.value = state.copy(profile = newProfile, isPlaying = false, savedSuccess = false, error = null)
+    }
+
+    fun updateInstrument(midiProgram: Int) {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        ringtoneGenerator.stopPreview()
+        val newProfile = state.profile.withMidiProgram(midiProgram)
         _uiState.value = state.copy(profile = newProfile, isPlaying = false, savedSuccess = false, error = null)
     }
 
@@ -78,7 +109,13 @@ class RingtoneDetailViewModel @Inject constructor(
             ringtoneGenerator.stopPreview()
             _uiState.value = state.copy(isPlaying = false)
         } else {
-            ringtoneGenerator.previewPlay(state.profile.notes)
+            val p = state.profile
+            val isMidi = p.format.equals("midi", ignoreCase = true)
+            if (isMidi) {
+                ringtoneGenerator.previewMidi(context, p.notes, p.midiProgram)
+            } else {
+                ringtoneGenerator.previewPlay(p.notes, p.midiProgram)
+            }
             _uiState.value = state.copy(isPlaying = true)
         }
     }

@@ -14,7 +14,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +27,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.ringtoneid.audio.AudioOutputFormat
+import com.example.ringtoneid.audio.MidiInstruments
 import kotlin.math.sin
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -155,11 +158,17 @@ fun RingtoneDetailScreen(
 
                     Spacer(Modifier.height(20.dp))
 
-                    // Controls: Play + Shuffle
+                    // Controls: Play + Variation nav
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        OutlinedIconButton(
+                            onClick = { viewModel.prevSeed() },
+                            enabled = state.profile.seed > 0
+                        ) {
+                            Icon(Icons.Default.SkipPrevious, contentDescription = "Previous variation")
+                        }
                         FloatingActionButton(
                             onClick = { viewModel.togglePreview() },
                             containerColor = MaterialTheme.colorScheme.primary
@@ -170,10 +179,8 @@ fun RingtoneDetailScreen(
                                 modifier = Modifier.size(32.dp)
                             )
                         }
-                        OutlinedButton(onClick = { viewModel.shuffleSeed() }) {
-                            Icon(Icons.Default.Shuffle, contentDescription = null, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Shuffle")
+                        OutlinedIconButton(onClick = { viewModel.shuffleSeed() }) {
+                            Icon(Icons.Default.SkipNext, contentDescription = "Next variation")
                         }
                     }
 
@@ -198,6 +205,69 @@ fun RingtoneDetailScreen(
                     ) {
                         Text("4", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("16", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Format selector
+                    Text(
+                        "Format: ${state.profile.format.uppercase()}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        AudioOutputFormat.entries.forEach { fmt ->
+                            FilterChip(
+                                selected = state.profile.format.equals(fmt.name, ignoreCase = true),
+                                onClick = { viewModel.updateFormat(fmt.name.lowercase()) },
+                                label = { Text(fmt.label) }
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.height(16.dp))
+
+                    // Instrument selector
+                    val currentInstrument = MidiInstruments.findByProgram(state.profile.midiProgram)
+                    var instrumentExpanded by remember { mutableStateOf(false) }
+                    ExposedDropdownMenuBox(
+                        expanded = instrumentExpanded,
+                        onExpandedChange = { instrumentExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = currentInstrument.name,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Instrument") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = instrumentExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = instrumentExpanded,
+                            onDismissRequest = { instrumentExpanded = false }
+                        ) {
+                            var lastCategory = ""
+                            MidiInstruments.instruments.forEach { instrument ->
+                                if (instrument.category != lastCategory) {
+                                    lastCategory = instrument.category
+                                    Text(
+                                        instrument.category,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text(instrument.name) },
+                                    onClick = {
+                                        viewModel.updateInstrument(instrument.program)
+                                        instrumentExpanded = false
+                                    }
+                                )
+                            }
+                        }
                     }
 
                     Spacer(Modifier.height(24.dp))
