@@ -20,6 +20,16 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.example.ringtoneid.audio.AudioOutputFormat
 import com.example.ringtoneid.audio.MidiInstruments
+import com.example.ringtoneid.audio.MusicalKeys
+import com.example.ringtoneid.audio.MusicalStyles
+import androidx.compose.material3.RangeSlider
+import com.example.ringtoneid.audio.Articulations
+import com.example.ringtoneid.audio.Harmonies
+import com.example.ringtoneid.audio.MelodicContours
+import com.example.ringtoneid.audio.MotifRepeat
+import com.example.ringtoneid.audio.Octaves
+import com.example.ringtoneid.audio.Tempo
+import com.example.ringtoneid.audio.TempoContours
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -175,6 +185,341 @@ fun SettingsScreen(
                     }
                 }
 
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+            }
+
+            // Default musical style section
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Musical Style",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+                Text(
+                    "Controls the scale (and mood) used to turn phone digits into a melody.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+                val currentStyle = MusicalStyles.fromId(uiState.defaultStyle)
+                var styleExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = styleExpanded,
+                    onExpandedChange = { styleExpanded = it },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = "${currentStyle.displayName} — ${currentStyle.description}",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = styleExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = styleExpanded,
+                        onDismissRequest = { styleExpanded = false }
+                    ) {
+                        MusicalStyles.ALL.forEach { style ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(style.displayName, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            style.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setDefaultStyle(style.id)
+                                    styleExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Key",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                val currentKey = MusicalKeys.nameForRoot(uiState.defaultRoot)
+                var keyExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = keyExpanded,
+                    onExpandedChange = { keyExpanded = it },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = currentKey,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = keyExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = keyExpanded,
+                        onDismissRequest = { keyExpanded = false }
+                    ) {
+                        MusicalKeys.ALL.forEach { key ->
+                            DropdownMenuItem(
+                                text = { Text(key.displayName) },
+                                onClick = {
+                                    viewModel.setDefaultRoot(key.rootNote)
+                                    keyExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Tempo: ${uiState.defaultTempoMin}–${uiState.defaultTempoMax} BPM",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                RangeSlider(
+                    value = uiState.defaultTempoMin.toFloat()..uiState.defaultTempoMax.toFloat(),
+                    onValueChange = { viewModel.setDefaultTempoRange(it.start.roundToInt(), it.endInclusive.roundToInt()) },
+                    valueRange = Tempo.MIN_BPM.toFloat()..Tempo.MAX_BPM.toFloat(),
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                )
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("${Tempo.MIN_BPM} (slow)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${Tempo.MAX_BPM} (fast)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Tempo motion",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                var tempoContourExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = tempoContourExpanded,
+                    onExpandedChange = { tempoContourExpanded = it },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = TempoContours.fromId(uiState.defaultTempoContour).displayName,
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tempoContourExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = tempoContourExpanded,
+                        onDismissRequest = { tempoContourExpanded = false }
+                    ) {
+                        TempoContours.ALL.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(option.displayName, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            option.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setDefaultTempoContour(option.id)
+                                    tempoContourExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+            }
+
+            // Melody section
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Melody",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+
+                var contourExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = contourExpanded,
+                    onExpandedChange = { contourExpanded = it },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = MelodicContours.fromId(uiState.defaultContour).displayName,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Contour") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = contourExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = contourExpanded,
+                        onDismissRequest = { contourExpanded = false }
+                    ) {
+                        MelodicContours.ALL.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(option.displayName, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            option.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setDefaultContour(option.id)
+                                    contourExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Register",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Octaves.ALL.forEach { option ->
+                        FilterChip(
+                            selected = uiState.defaultOctave == option.shift,
+                            onClick = { viewModel.setDefaultOctave(option.shift) },
+                            label = { Text(option.displayName) }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Repeat phrase: ${uiState.defaultRepeat}×",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Slider(
+                    value = uiState.defaultRepeat.toFloat(),
+                    onValueChange = { viewModel.setDefaultRepeat(it.roundToInt()) },
+                    valueRange = MotifRepeat.MIN.toFloat()..MotifRepeat.MAX.toFloat(),
+                    steps = MotifRepeat.MAX - MotifRepeat.MIN - 1,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Articulation",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Articulations.ALL.forEach { option ->
+                        FilterChip(
+                            selected = uiState.defaultArticulation == option.id,
+                            onClick = { viewModel.setDefaultArticulation(option.id) },
+                            label = { Text(option.displayName) }
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                var harmonyExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = harmonyExpanded,
+                    onExpandedChange = { harmonyExpanded = it },
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    OutlinedTextField(
+                        value = Harmonies.fromId(uiState.defaultHarmony).displayName,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Harmony") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = harmonyExpanded) },
+                        modifier = Modifier.menuAnchor().fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(
+                        expanded = harmonyExpanded,
+                        onDismissRequest = { harmonyExpanded = false }
+                    ) {
+                        Harmonies.ALL.forEach { option ->
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(option.displayName, fontWeight = FontWeight.Bold)
+                                        Text(
+                                            option.description,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    viewModel.setDefaultHarmony(option.id)
+                                    harmonyExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+            }
+
+            // Reset to defaults section
+            item {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = { viewModel.resetToDefaults() },
+                    enabled = !uiState.isAtDefaults,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                ) {
+                    Text("Reset all to defaults")
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (uiState.isAtDefaults) "Using factory defaults" else "Customized",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
             }

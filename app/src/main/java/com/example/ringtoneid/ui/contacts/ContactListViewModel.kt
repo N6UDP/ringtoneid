@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ringtoneid.domain.model.Contact
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
+import com.example.ringtoneid.domain.usecase.fromDefaults
 import com.example.ringtoneid.domain.usecase.GetContactsUseCase
 import com.example.ringtoneid.domain.usecase.SetContactRingtoneUseCase
 import com.example.ringtoneid.domain.repository.ContactsRepository
@@ -60,10 +61,6 @@ class ContactListViewModel @Inject constructor(
                 val contactsWithout = contacts.filter { !it.hasCustomRingtone && it.phoneNumber.isNotBlank() }
                 if (contactsWithout.isEmpty()) return@launch
 
-                val defaultFormat = prefs.getString("default_format", "wav") ?: "wav"
-                val defaultInstrument = prefs.getInt("default_instrument", 0)
-                val defaultLength = prefs.getInt("default_length", 8)
-
                 val total = contactsWithout.size
                 contactsWithout.forEachIndexed { index, contact ->
                     _bulkActionState.value = BulkActionState.InProgress(
@@ -71,12 +68,7 @@ class ContactListViewModel @Inject constructor(
                         message = "Auto-generating: ${contact.name} (${index + 1}/$total)"
                     )
                     try {
-                        val profile = generateRingtoneUseCase(
-                            contact,
-                            format = defaultFormat,
-                            midiProgram = defaultInstrument,
-                            noteCount = defaultLength
-                        )
+                        val profile = generateRingtoneUseCase.fromDefaults(context, contact)
                         setContactRingtoneUseCase(profile)
                     } catch (_: Exception) {}
                 }
@@ -111,7 +103,7 @@ class ContactListViewModel @Inject constructor(
                     message = "Setting ringtone for ${contact.name} (${index + 1}/$total)"
                 )
                 try {
-                    val profile = generateRingtoneUseCase(contact)
+                    val profile = generateRingtoneUseCase.fromDefaults(context, contact)
                     setContactRingtoneUseCase(profile)
                 } catch (_: Exception) {
                     // Skip failures on individual contacts

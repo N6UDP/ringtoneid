@@ -30,25 +30,82 @@ class RingtoneGenerator @Inject constructor() {
     private var audioTrack: AudioTrack? = null
     private var mediaPlayer: MediaPlayer? = null
 
-    private val digitToMidi = mapOf(
-        '0' to 60, '1' to 62, '2' to 64, '3' to 65, '4' to 67,
-        '5' to 69, '6' to 71, '7' to 72, '8' to 74, '9' to 76
-    )
-
-    fun phoneNumberToNotes(phoneNumber: String, seed: Int = 0, noteCount: Int = 8): List<Int> {
-        val digits = phoneNumber.filter { it.isDigit() }
-        val baseNotes = digits.map { digitToMidi[it] ?: 60 }
-        if (baseNotes.isEmpty()) return List(noteCount) { 60 }
+    /**
+     * Maps a phone number onto a melody that always stays within the chosen
+     * musical scale (style) and key (rootNote). Each digit selects a scale degree;
+     * the seed reorders digits and nudges degrees *within* the scale, so shuffle
+     * variations remain in-key instead of introducing dissonant chromatic offsets.
+     */
+    fun phoneNumberToNotes(
+        phoneNumber: String,
+        seed: Int = 0,
+        noteCount: Int = 8,
+        styleId: String = MusicalStyles.DEFAULT.id,
+        rootNote: Int = MusicalKeys.DEFAULT_ROOT,
+        contourId: String = MelodicContours.DEFAULT.id,
+        octaveShift: Int = Octaves.DEFAULT_SHIFT,
+        repeat: Int = MotifRepeat.DEFAULT
+    ): List<Int> {
+        val scale = MusicalStyles.fromId(styleId).intervals
+        val digits = phoneNumber.filter { it.isDigit() }.map { it - '0' }
+        val root = rootNote + octaveShift
+        if (digits.isEmpty()) return List(noteCount * repeat.coerceAtLeast(1)) { root }
 
         val random = java.util.Random((digits.hashCode().toLong() * 31) + seed.toLong())
-        val notes = mutableListOf<Int>()
+        val motif = mutableListOf<Int>()
         for (i in 0 until noteCount) {
-            val baseIdx = (i + seed) % baseNotes.size
-            val baseNote = baseNotes[baseIdx]
-            val offset = if (seed == 0) 0 else (random.nextInt(5) - 2) * 2
-            notes.add((baseNote + offset).coerceIn(48, 84))
+            val digit = digits[(i + seed) % digits.size]
+            var degree = digit
+            // Seed variation: shift by whole scale steps only — never leaves the key.
+            if (seed != 0) degree += random.nextInt(3) - 1
+            val scaleIndex = ((degree % scale.size) + scale.size) % scale.size
+            val octave = Math.floorDiv(degree, scale.size)
+            val note = (root + octave * 12 + scale[scaleIndex]).coerceIn(36, 96)
+            motif.add(note)
         }
-        return notes
+
+        val shaped = applyContour(motif, contourId, random)
+
+        val result = mutableListOf<Int>()
+        repeat(repeat.coerceIn(MotifRepeat.MIN, MotifRepeat.MAX)) { result.addAll(shaped) }
+        return result
+    }
+
+    private fun applyContour(notes: List<Int>, contourId: String, random: java.util.Random): List<Int> {
+        return when (contourId) {
+            MelodicContours.ASCENDING.id -> notes.sorted()
+            MelodicContours.DESCENDING.id -> notes.sortedDescending()
+            MelodicContours.ARCH.id -> {
+                val asc = notes.sorted()
+                val half = (asc.size + 1) / 2
+                asc.take(half) + asc.drop(half).reversed()
+            }
+            MelodicContours.RANDOM.id -> notes.shuffled(random)
+            else -> notes
+        }
+    }
+
+    /** Resolves a per-note tempo (BPM) list based on the tempo range and motion. */
+    private fun resolveTempos(count: Int, tempoMin: Int, tempoMax: Int, contourId: String, seed: Int): List<Int> {
+        val lo = tempoMin.coerceIn(Tempo.MIN_BPM, Tempo.MAX_BPM)
+        val hi = tempoMax.coerceIn(Tempo.MIN_BPM, Tempo.MAX_BPM)
+        val min = minOf(lo, hi)
+        val max = maxOf(lo, hi)
+        if (count <= 0) return emptyList()
+        if (min == max) return List(count) { min }
+        return when (contourId) {
+            TempoContours.ACCELERATE.id -> List(count) { i ->
+                (min + (max - min) * i / maxOf(1, count - 1))
+            }
+            TempoContours.DECELERATE.id -> List(count) { i ->
+                (max - (max - min) * i / maxOf(1, count - 1))
+            }
+            TempoContours.RANDOM.id -> {
+                val rnd = java.util.Random(seed.toLong() * 101 + 7)
+                List(count) { min + rnd.nextInt(max - min + 1) }
+            }
+            else -> List(count) { (min + max) / 2 }
+        }
     }
 
     private fun midiToFrequency(midi: Int): Double = 440.0 * Math.pow(2.0, (midi - 69) / 12.0)
@@ -77,25 +134,43 @@ class RingtoneGenerator @Inject constructor() {
         }
     }
 
-    fun generatePcm(notes: List<Int>, midiProgram: Int = 0): ByteArray {
+    fun generatePcm(
+        notes: List<Int>,
+        midiProgram: Int = 0,
+        tempos: List<Int> = List(notes.size) { Tempo.DEFAULT_BPM },
+        articulationGate: Double = 0.9,
+        harmonyInterval: Int? = null
+    ): ByteArray {
         val sampleRate = 44100
-        val noteDurationMs = 200
         val fadeMs = 20
-        val samplesPerNote = sampleRate * noteDurationMs / 1000
         val fadeSamples = sampleRate * fadeMs / 1000
 
         val output = ByteArrayOutputStream()
-        val buffer = ByteBuffer.allocate(samplesPerNote * 2).order(ByteOrder.LITTLE_ENDIAN)
 
-        for (midi in notes) {
-            buffer.clear()
+        notes.forEachIndexed { index, midi ->
+            val bpm = (tempos.getOrNull(index) ?: Tempo.DEFAULT_BPM).coerceIn(Tempo.MIN_BPM, Tempo.MAX_BPM)
+            // Each note is an eighth note: 150 BPM -> 200 ms.
+            val noteDurationMs = 30000 / bpm
+            val samplesPerNote = sampleRate * noteDurationMs / 1000
+            // Articulation: how much of the slot actually sounds before silence.
+            val soundSamples = (samplesPerNote * articulationGate).toInt().coerceIn(1, samplesPerNote)
+            val buffer = ByteBuffer.allocate(samplesPerNote * 2).order(ByteOrder.LITTLE_ENDIAN)
+
             val freq = midiToFrequency(midi)
+            val harmonyFreq = harmonyInterval?.let { midiToFrequency((midi + it).coerceIn(24, 108)) }
             for (i in 0 until samplesPerNote) {
-                val phase = 2 * PI * freq * i / sampleRate
-                val sample = waveform(phase, midiProgram)
+                var sample = if (i < soundSamples) {
+                    val phase = 2 * PI * freq * i / sampleRate
+                    var s = waveform(phase, midiProgram)
+                    if (harmonyFreq != null) {
+                        val hp = 2 * PI * harmonyFreq * i / sampleRate
+                        s = (s + 0.6 * waveform(hp, midiProgram)) * 0.7
+                    }
+                    s
+                } else 0.0
                 val envelope = when {
                     i < fadeSamples -> i.toDouble() / fadeSamples
-                    i > samplesPerNote - fadeSamples -> (samplesPerNote - i).toDouble() / fadeSamples
+                    i > soundSamples - fadeSamples -> ((soundSamples - i).toDouble() / fadeSamples).coerceIn(0.0, 1.0)
                     else -> 1.0
                 }
                 val pcmValue = (sample * envelope * Short.MAX_VALUE * 0.8).toInt()
@@ -107,12 +182,19 @@ class RingtoneGenerator @Inject constructor() {
         return output.toByteArray()
     }
 
+    /** Builds the per-note tempo list for a profile, honouring range + tempo motion. */
+    private fun temposFor(profile: RingtoneProfile): List<Int> =
+        resolveTempos(profile.notes.size, profile.tempoMin, profile.tempoMax, profile.tempoContour, profile.seed)
+
     fun generateAndSave(context: Context, profile: RingtoneProfile): Uri {
         val format = try { AudioOutputFormat.valueOf(profile.format.uppercase()) } catch (_: Exception) { AudioOutputFormat.WAV }
+        val tempos = temposFor(profile)
+        val gate = Articulations.gateForId(profile.articulation)
+        val harmony = Harmonies.intervalForId(profile.harmony)
         val audioData = when (format) {
-            AudioOutputFormat.WAV -> { val pcm = generatePcm(profile.notes, profile.midiProgram); pcmToWav(pcm, 44100, 1) }
-            AudioOutputFormat.M4A -> { val pcm = generatePcm(profile.notes, profile.midiProgram); pcmToM4a(context, pcm, 44100, 1) }
-            AudioOutputFormat.MIDI -> notesToMidi(profile.notes, profile.midiProgram)
+            AudioOutputFormat.WAV -> { val pcm = generatePcm(profile.notes, profile.midiProgram, tempos, gate, harmony); pcmToWav(pcm, 44100, 1) }
+            AudioOutputFormat.M4A -> { val pcm = generatePcm(profile.notes, profile.midiProgram, tempos, gate, harmony); pcmToM4a(context, pcm, 44100, 1) }
+            AudioOutputFormat.MIDI -> notesToMidi(profile.notes, profile.midiProgram, tempos, gate, harmony)
         }
 
         val safeName = profile.contactName.replace(Regex("[^a-zA-Z0-9_]"), "_")
@@ -256,38 +338,66 @@ class RingtoneGenerator @Inject constructor() {
         }
     }
 
-    private fun notesToMidi(notes: List<Int>, midiProgram: Int = 0): ByteArray {
-        val ticksPerNote = 96
-        val tempo = 500000
+    private fun notesToMidi(
+        notes: List<Int>,
+        midiProgram: Int = 0,
+        tempos: List<Int> = List(notes.size) { Tempo.DEFAULT_BPM },
+        articulationGate: Double = 0.9,
+        harmonyInterval: Int? = null
+    ): ByteArray {
+        // Eighth notes: division is 96 ticks/quarter, so 48 ticks = one eighth note.
+        val ticksPerNote = 48
+        val onTicks = (ticksPerNote * articulationGate).toInt().coerceIn(1, ticksPerNote)
+        val offTicks = ticksPerNote - onTicks
         val channel = 0
         val velocity = 100
 
         val output = ByteArrayOutputStream()
         val track = ByteArrayOutputStream()
 
-        // Tempo meta event
-        track.write(byteArrayOf(0x00))
-        track.write(byteArrayOf(0xFF.toByte(), 0x51, 0x03))
-        track.write(byteArrayOf(
-            ((tempo shr 16) and 0xFF).toByte(),
-            ((tempo shr 8) and 0xFF).toByte(),
-            (tempo and 0xFF).toByte()
-        ))
-
         // Program change
         track.write(byteArrayOf(0x00))
         track.write(byteArrayOf((0xC0 or channel).toByte(), midiProgram.toByte()))
 
-        // Note events
-        for (note in notes) {
+        // Note events (tempo meta emitted per note so range/motion is honoured).
+        // pendingDelta carries the silent gap from the previous note onto the next event.
+        var pendingDelta = 0
+        notes.forEachIndexed { index, note ->
+            val bpm = (tempos.getOrNull(index) ?: Tempo.DEFAULT_BPM).coerceIn(Tempo.MIN_BPM, Tempo.MAX_BPM)
+            val tempo = 60000000 / bpm
+            val harmonyNote = harmonyInterval?.let { (note + it).coerceIn(24, 108) }
+
+            // Tempo meta for this note (absorbs any pending gap delta)
+            track.write(writeVarLen(pendingDelta))
+            track.write(byteArrayOf(0xFF.toByte(), 0x51, 0x03))
+            track.write(byteArrayOf(
+                ((tempo shr 16) and 0xFF).toByte(),
+                ((tempo shr 8) and 0xFF).toByte(),
+                (tempo and 0xFF).toByte()
+            ))
+
+            // Note on (melody + optional harmony)
             track.write(byteArrayOf(0x00))
             track.write(byteArrayOf((0x90 or channel).toByte(), note.toByte(), velocity.toByte()))
-            track.write(writeVarLen(ticksPerNote))
+            if (harmonyNote != null) {
+                track.write(byteArrayOf(0x00))
+                track.write(byteArrayOf((0x90 or channel).toByte(), harmonyNote.toByte(), (velocity * 3 / 4).toByte()))
+            }
+
+            // Note off after the sounding portion
+            track.write(writeVarLen(onTicks))
             track.write(byteArrayOf((0x80 or channel).toByte(), note.toByte(), 0x00))
+            if (harmonyNote != null) {
+                track.write(byteArrayOf(0x00))
+                track.write(byteArrayOf((0x80 or channel).toByte(), harmonyNote.toByte(), 0x00))
+            }
+
+            pendingDelta = offTicks
         }
 
-        // End of track
-        track.write(byteArrayOf(0x00, 0xFF.toByte(), 0x2F, 0x00))
+        // End of track (absorbs final gap)
+        track.write(writeVarLen(pendingDelta))
+        track.write(byteArrayOf(0xFF.toByte(), 0x2F, 0x00))
 
         val trackBytes = track.toByteArray()
 
@@ -331,9 +441,27 @@ class RingtoneGenerator @Inject constructor() {
         (value and 0xFF).toByte()
     )
 
-    fun previewPlay(notes: List<Int>, midiProgram: Int = 0) {
+    /** Plays a full profile preview (chooses MIDI vs PCM and applies all params). */
+    fun preview(context: Context, profile: RingtoneProfile) {
+        val tempos = temposFor(profile)
+        val gate = Articulations.gateForId(profile.articulation)
+        val harmony = Harmonies.intervalForId(profile.harmony)
+        if (profile.format.equals("midi", ignoreCase = true)) {
+            previewMidi(context, profile.notes, profile.midiProgram, tempos, gate, harmony)
+        } else {
+            previewPlay(profile.notes, profile.midiProgram, tempos, gate, harmony)
+        }
+    }
+
+    fun previewPlay(
+        notes: List<Int>,
+        midiProgram: Int = 0,
+        tempos: List<Int> = List(notes.size) { Tempo.DEFAULT_BPM },
+        articulationGate: Double = 0.9,
+        harmonyInterval: Int? = null
+    ) {
         stopPreview()
-        val pcm = generatePcm(notes, midiProgram)
+        val pcm = generatePcm(notes, midiProgram, tempos, articulationGate, harmonyInterval)
         val sampleRate = 44100
         val minBuf = AudioTrack.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val track = AudioTrack.Builder()
@@ -358,10 +486,17 @@ class RingtoneGenerator @Inject constructor() {
         track.play()
     }
 
-    fun previewMidi(context: Context, notes: List<Int>, midiProgram: Int = 0) {
+    fun previewMidi(
+        context: Context,
+        notes: List<Int>,
+        midiProgram: Int = 0,
+        tempos: List<Int> = List(notes.size) { Tempo.DEFAULT_BPM },
+        articulationGate: Double = 0.9,
+        harmonyInterval: Int? = null
+    ) {
         stopPreview()
         try {
-            val midiData = notesToMidi(notes, midiProgram)
+            val midiData = notesToMidi(notes, midiProgram, tempos, articulationGate, harmonyInterval)
             val tempFile = File(context.cacheDir, "preview_ringtone.mid")
             tempFile.writeBytes(midiData)
             val player = MediaPlayer()
@@ -380,7 +515,7 @@ class RingtoneGenerator @Inject constructor() {
             mediaPlayer = player
         } catch (_: Exception) {
             // Fallback to PCM preview if MIDI playback fails
-            previewPlay(notes, midiProgram)
+            previewPlay(notes, midiProgram, tempos, articulationGate, harmonyInterval)
         }
     }
 

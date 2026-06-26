@@ -9,6 +9,7 @@ import com.example.ringtoneid.domain.repository.ContactsRepository
 import com.example.ringtoneid.domain.repository.RingtoneRepository
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
 import com.example.ringtoneid.domain.usecase.SetContactRingtoneUseCase
+import com.example.ringtoneid.domain.usecase.fromDefaults
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -25,11 +26,6 @@ class AutoGenerateWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         return try {
-            val prefs = applicationContext.getSharedPreferences("ringtone_id_prefs", Context.MODE_PRIVATE)
-            val defaultFormat = prefs.getString("default_format", "wav") ?: "wav"
-            val defaultInstrument = prefs.getInt("default_instrument", 0)
-            val defaultLength = prefs.getInt("default_length", 8)
-
             val contacts = contactsRepository.getContacts().first()
             val savedIds = ringtoneRepository.getSavedRingtones().first().map { it.contactId }.toSet()
 
@@ -37,12 +33,7 @@ class AutoGenerateWorker @AssistedInject constructor(
 
             for (contact in newContacts) {
                 try {
-                    val profile = generateRingtoneUseCase(
-                        contact,
-                        format = defaultFormat,
-                        midiProgram = defaultInstrument,
-                        noteCount = defaultLength
-                    )
+                    val profile = generateRingtoneUseCase.fromDefaults(applicationContext, contact)
                     setContactRingtoneUseCase(profile)
                 } catch (_: Exception) {}
             }
