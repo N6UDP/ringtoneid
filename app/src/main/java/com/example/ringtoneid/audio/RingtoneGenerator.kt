@@ -134,6 +134,44 @@ class RingtoneGenerator @Inject constructor() {
         }
     }
 
+    /**
+     * Per-note amplitude envelope. A short attack and decay-to-sustain plus a release
+     * ramp give each note a more natural, less "buzzy" shape than a flat gate. All
+     * lengths are expressed in samples relative to the audible portion of the note.
+     */
+    private fun adsrEnvelope(i: Int, soundSamples: Int, sampleRate: Int): Double {
+        if (i >= soundSamples) return 0.0
+        val attack = (sampleRate * 0.008).toInt().coerceAtLeast(1)
+        val decay = (sampleRate * 0.05).toInt().coerceAtLeast(1)
+        val release = (sampleRate * 0.04).toInt().coerceIn(1, soundSamples)
+        val sustain = 0.75
+        val releaseStart = soundSamples - release
+        return when {
+            i < attack -> i.toDouble() / attack
+            i < attack + decay -> 1.0 - (1.0 - sustain) * ((i - attack).toDouble() / decay)
+            i >= releaseStart -> sustain * ((soundSamples - i).toDouble() / release).coerceIn(0.0, 1.0)
+            else -> sustain
+        }
+    }
+
+    /**
+     * Subtle feedback-comb reverb tail for a touch of room/space, mixed lightly so it
+     * enriches without muddying short ringtones. Operates in-place on a float buffer.
+     */
+    private fun applyReverb(buf: DoubleArray, sampleRate: Int, wet: Double = 0.18) {
+        if (wet <= 0.0) return
+        val delay = (sampleRate * 0.06).toInt().coerceAtLeast(1)
+        val feedback = 0.32
+        val wetBuf = DoubleArray(buf.size)
+        for (i in buf.indices) {
+            val echoed = if (i >= delay) wetBuf[i - delay] * feedback else 0.0
+            wetBuf[i] = buf[i] + echoed
+        }
+        for (i in buf.indices) {
+            buf[i] = buf[i] * (1.0 - wet) + wetBuf[i] * wet
+        }
+    }
+
     fun generatePcm(
         notes: List<Int>,
         midiProgram: Int = 0,
@@ -142,44 +180,55 @@ class RingtoneGenerator @Inject constructor() {
         harmonyInterval: Int? = null
     ): ByteArray {
         val sampleRate = 44100
-        val fadeMs = 20
-        val fadeSamples = sampleRate * fadeMs / 1000
 
-        val output = ByteArrayOutputStream()
-
-        notes.forEachIndexed { index, midi ->
+        // Resolve per-note slot sizes up front so we can render into one continuous buffer
+        // (enables a reverb tail and whole-tune peak normalization).
+        val slotSizes = notes.indices.map { index ->
             val bpm = (tempos.getOrNull(index) ?: Tempo.DEFAULT_BPM).coerceIn(Tempo.MIN_BPM, Tempo.MAX_BPM)
-            // Each note is an eighth note: 150 BPM -> 200 ms.
             val noteDurationMs = 30000 / bpm
-            val samplesPerNote = sampleRate * noteDurationMs / 1000
-            // Articulation: how much of the slot actually sounds before silence.
-            val soundSamples = (samplesPerNote * articulationGate).toInt().coerceIn(1, samplesPerNote)
-            val buffer = ByteBuffer.allocate(samplesPerNote * 2).order(ByteOrder.LITTLE_ENDIAN)
+            sampleRate * noteDurationMs / 1000
+        }
+        val totalSamples = slotSizes.sum()
+        if (totalSamples == 0) return ByteArray(0)
 
+        val buf = DoubleArray(totalSamples)
+        var cursor = 0
+        notes.forEachIndexed { index, midi ->
+            val samplesPerNote = slotSizes[index]
+            val soundSamples = (samplesPerNote * articulationGate).toInt().coerceIn(1, samplesPerNote)
             val freq = midiToFrequency(midi)
             val harmonyFreq = harmonyInterval?.let { midiToFrequency((midi + it).coerceIn(24, 108)) }
             for (i in 0 until samplesPerNote) {
-                var sample = if (i < soundSamples) {
+                var s = if (i < soundSamples) {
                     val phase = 2 * PI * freq * i / sampleRate
-                    var s = waveform(phase, midiProgram)
+                    var v = waveform(phase, midiProgram)
                     if (harmonyFreq != null) {
                         val hp = 2 * PI * harmonyFreq * i / sampleRate
-                        s = (s + 0.6 * waveform(hp, midiProgram)) * 0.7
+                        v = (v + 0.6 * waveform(hp, midiProgram)) * 0.7
                     }
-                    s
+                    v
                 } else 0.0
-                val envelope = when {
-                    i < fadeSamples -> i.toDouble() / fadeSamples
-                    i > soundSamples - fadeSamples -> ((soundSamples - i).toDouble() / fadeSamples).coerceIn(0.0, 1.0)
-                    else -> 1.0
-                }
-                val pcmValue = (sample * envelope * Short.MAX_VALUE * 0.8).toInt()
-                    .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
-                buffer.putShort(pcmValue)
+                s *= adsrEnvelope(i, soundSamples, sampleRate)
+                buf[cursor + i] = s
             }
-            output.write(buffer.array(), 0, samplesPerNote * 2)
+            cursor += samplesPerNote
         }
-        return output.toByteArray()
+
+        applyReverb(buf, sampleRate)
+
+        // Peak-normalize so output is consistently loud across instruments/harmony
+        // stacking without clipping.
+        var peak = 0.0
+        for (v in buf) { val a = abs(v); if (a > peak) peak = a }
+        val gain = if (peak > 0.0) (0.95 / peak).coerceAtMost(4.0) else 1.0
+
+        val output = ByteBuffer.allocate(totalSamples * 2).order(ByteOrder.LITTLE_ENDIAN)
+        for (v in buf) {
+            val pcmValue = (v * gain * Short.MAX_VALUE).toInt()
+                .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            output.putShort(pcmValue)
+        }
+        return output.array()
     }
 
     /** Builds the per-note tempo list for a profile, honouring range + tempo motion. */
