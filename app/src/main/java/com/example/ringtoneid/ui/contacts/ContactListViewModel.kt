@@ -3,6 +3,7 @@ package com.example.ringtoneid.ui.contacts
 import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.ringtoneid.audio.RingtoneGenerator
 import com.example.ringtoneid.domain.model.Contact
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
 import com.example.ringtoneid.domain.usecase.fromPresetPool
@@ -37,7 +38,8 @@ class ContactListViewModel @Inject constructor(
     private val generateRingtoneUseCase: GenerateRingtoneUseCase,
     private val setContactRingtoneUseCase: SetContactRingtoneUseCase,
     private val ringtoneRepository: RingtoneRepository,
-    private val contactsRepository: ContactsRepository
+    private val contactsRepository: ContactsRepository,
+    private val ringtoneGenerator: RingtoneGenerator
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<ContactListUiState>(ContactListUiState.Loading)
@@ -45,6 +47,10 @@ class ContactListViewModel @Inject constructor(
 
     private val _bulkActionState = MutableStateFlow<BulkActionState>(BulkActionState.Idle)
     val bulkActionState: StateFlow<BulkActionState> = _bulkActionState.asStateFlow()
+
+    /** Contact whose existing ringtone is currently being previewed inline, if any. */
+    private val _playingContactId = MutableStateFlow<Long?>(null)
+    val playingContactId: StateFlow<Long?> = _playingContactId.asStateFlow()
 
     init {
         loadContacts()
@@ -114,6 +120,56 @@ class ContactListViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Generate ringtones for an explicitly chosen subset of contacts. Unlike the
+     * "Generate All" path this honours the user's deliberate selection and will
+     * (re)generate even for contacts that already have a custom ringtone.
+     */
+    fun generateForContacts(contacts: List<Contact>) {
+        val targets = contacts.filter { it.phoneNumber.isNotBlank() }
+        if (targets.isEmpty()) return
+        stopPlayback()
+        viewModelScope.launch {
+            val total = targets.size
+            targets.forEachIndexed { index, contact ->
+                _bulkActionState.value = BulkActionState.InProgress(
+                    progress = index.toFloat() / total,
+                    message = "Setting ringtone for ${contact.name} (${index + 1}/$total)"
+                )
+                try {
+                    val profile = generateRingtoneUseCase.fromPresetPool(context, contact)
+                    setContactRingtoneUseCase(profile)
+                } catch (_: Exception) {
+                }
+            }
+            _bulkActionState.value = BulkActionState.Idle
+            loadContacts()
+        }
+    }
+
+    /** Preview (or stop previewing) a contact's already-assigned ringtone in-list. */
+    fun togglePlay(contact: Contact) {
+        if (_playingContactId.value == contact.id) {
+            stopPlayback()
+            return
+        }
+        viewModelScope.launch {
+            ringtoneGenerator.stopPreview()
+            val profile = ringtoneRepository.getRingtoneForContact(contact.id)
+            if (profile == null) {
+                _playingContactId.value = null
+                return@launch
+            }
+            ringtoneGenerator.preview(context, profile)
+            _playingContactId.value = contact.id
+        }
+    }
+
+    fun stopPlayback() {
+        ringtoneGenerator.stopPreview()
+        _playingContactId.value = null
+    }
+
     fun removeAllRingtones() {
         viewModelScope.launch {
             _bulkActionState.value = BulkActionState.InProgress(
@@ -139,5 +195,10 @@ class ContactListViewModel @Inject constructor(
             _bulkActionState.value = BulkActionState.Idle
             loadContacts()
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        ringtoneGenerator.stopPreview()
     }
 }
