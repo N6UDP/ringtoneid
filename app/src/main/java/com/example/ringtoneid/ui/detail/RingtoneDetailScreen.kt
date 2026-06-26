@@ -1,7 +1,10 @@
 package com.example.ringtoneid.ui.detail
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
@@ -19,6 +22,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -41,6 +45,7 @@ import com.example.ringtoneid.audio.Harmonies
 import com.example.ringtoneid.audio.MelodicContours
 import com.example.ringtoneid.audio.MotifRepeat
 import com.example.ringtoneid.audio.Octaves
+import com.example.ringtoneid.audio.RingtonePurpose
 import com.example.ringtoneid.audio.Tempo
 import com.example.ringtoneid.audio.TempoContours
 import kotlin.math.sin
@@ -76,13 +81,41 @@ fun RingtoneDetailScreen(
         }
     }
 
+    val writeSettingsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { viewModel.onWriteSettingsResult() }
+
     LaunchedEffect(contactId) { viewModel.loadContact(contactId) }
+
+    val readyState = uiState as? DetailUiState.Ready
+
+    LaunchedEffect(readyState?.shareUri) {
+        val shareUri = readyState?.shareUri ?: return@LaunchedEffect
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = context.contentResolver.getType(shareUri) ?: "audio/*"
+            putExtra(Intent.EXTRA_STREAM, shareUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(send, "Share ringtone"))
+        viewModel.shareHandled()
+    }
+
+    LaunchedEffect(readyState?.needsWriteSettings) {
+        if (readyState?.needsWriteSettings == true) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                Uri.parse("package:${context.packageName}")
+            )
+            writeSettingsLauncher.launch(intent)
+        }
+    }
 
     LaunchedEffect(uiState) {
         val state = uiState as? DetailUiState.Ready ?: return@LaunchedEffect
         when {
             state.savedSuccess -> snackbarHostState.showSnackbar("Ringtone set successfully!")
-            state.error != null -> snackbarHostState.showSnackbar("Error: ${state.error}")
+            state.message != null -> { snackbarHostState.showSnackbar(state.message); viewModel.messageShown() }
+            state.error != null -> { snackbarHostState.showSnackbar("Error: ${state.error}"); viewModel.messageShown() }
         }
     }
 
@@ -685,6 +718,58 @@ fun RingtoneDetailScreen(
                             Text("Saving...")
                         } else {
                             Text(if (state.savedSuccess) "✓ Set as Ringtone" else "Set as Ringtone")
+                        }
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+
+                    // Share + set as default system sound
+                    var defaultMenuOpen by remember { mutableStateOf(false) }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { viewModel.shareCurrent() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Share")
+                        }
+                        Box(modifier = Modifier.weight(1f)) {
+                            OutlinedButton(
+                                onClick = { defaultMenuOpen = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Set as default")
+                            }
+                            DropdownMenu(
+                                expanded = defaultMenuOpen,
+                                onDismissRequest = { defaultMenuOpen = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Phone ringtone") },
+                                    onClick = {
+                                        defaultMenuOpen = false
+                                        viewModel.setAsDefault(RingtonePurpose.RINGTONE)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Notification sound") },
+                                    onClick = {
+                                        defaultMenuOpen = false
+                                        viewModel.setAsDefault(RingtonePurpose.NOTIFICATION)
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Alarm sound") },
+                                    onClick = {
+                                        defaultMenuOpen = false
+                                        viewModel.setAsDefault(RingtonePurpose.ALARM)
+                                    }
+                                )
+                            }
                         }
                     }
 

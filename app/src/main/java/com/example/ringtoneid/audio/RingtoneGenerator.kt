@@ -186,16 +186,9 @@ class RingtoneGenerator @Inject constructor() {
     private fun temposFor(profile: RingtoneProfile): List<Int> =
         resolveTempos(profile.notes.size, profile.tempoMin, profile.tempoMax, profile.tempoContour, profile.seed)
 
-    fun generateAndSave(context: Context, profile: RingtoneProfile): Uri {
-        val format = try { AudioOutputFormat.valueOf(profile.format.uppercase()) } catch (_: Exception) { AudioOutputFormat.WAV }
-        val tempos = temposFor(profile)
-        val gate = Articulations.gateForId(profile.articulation)
-        val harmony = Harmonies.intervalForId(profile.harmony)
-        val audioData = when (format) {
-            AudioOutputFormat.WAV -> { val pcm = generatePcm(profile.notes, profile.midiProgram, tempos, gate, harmony); pcmToWav(pcm, 44100, 1) }
-            AudioOutputFormat.M4A -> { val pcm = generatePcm(profile.notes, profile.midiProgram, tempos, gate, harmony); pcmToM4a(context, pcm, 44100, 1) }
-            AudioOutputFormat.MIDI -> notesToMidi(profile.notes, profile.midiProgram, tempos, gate, harmony)
-        }
+    fun generateAndSave(context: Context, profile: RingtoneProfile, purpose: RingtonePurpose = RingtonePurpose.RINGTONE): Uri {
+        val format = formatOf(profile)
+        val audioData = generateBytes(context, profile)
 
         val safeName = profile.contactName.replace(Regex("[^a-zA-Z0-9_]"), "_")
         val fileName = "ringtone_${profile.contactId}_${safeName}.${format.extension}"
@@ -203,12 +196,12 @@ class RingtoneGenerator @Inject constructor() {
         val values = ContentValues().apply {
             put(MediaStore.Audio.Media.DISPLAY_NAME, fileName)
             put(MediaStore.Audio.Media.MIME_TYPE, format.mimeType)
-            put(MediaStore.Audio.Media.IS_RINGTONE, 1)
+            put(MediaStore.Audio.Media.IS_RINGTONE, if (purpose == RingtonePurpose.RINGTONE) 1 else 0)
             put(MediaStore.Audio.Media.IS_MUSIC, 0)
-            put(MediaStore.Audio.Media.IS_NOTIFICATION, 0)
-            put(MediaStore.Audio.Media.IS_ALARM, 0)
+            put(MediaStore.Audio.Media.IS_NOTIFICATION, if (purpose == RingtonePurpose.NOTIFICATION) 1 else 0)
+            put(MediaStore.Audio.Media.IS_ALARM, if (purpose == RingtonePurpose.ALARM) 1 else 0)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                put(MediaStore.Audio.Media.RELATIVE_PATH, "Ringtones/")
+                put(MediaStore.Audio.Media.RELATIVE_PATH, purpose.relativePath)
                 put(MediaStore.Audio.Media.IS_PENDING, 1)
             }
         }
@@ -230,6 +223,39 @@ class RingtoneGenerator @Inject constructor() {
         }
 
         return uri
+    }
+
+    /** The output format selected by the profile, defaulting to WAV for unknown values. */
+    fun formatOf(profile: RingtoneProfile): AudioOutputFormat =
+        try { AudioOutputFormat.valueOf(profile.format.uppercase()) } catch (_: Exception) { AudioOutputFormat.WAV }
+
+    /** Renders the profile to encoded audio bytes (WAV/M4A/MIDI) without persisting them. */
+    fun generateBytes(context: Context, profile: RingtoneProfile): ByteArray {
+        val format = formatOf(profile)
+        val tempos = temposFor(profile)
+        val gate = Articulations.gateForId(profile.articulation)
+        val harmony = Harmonies.intervalForId(profile.harmony)
+        return when (format) {
+            AudioOutputFormat.WAV -> { val pcm = generatePcm(profile.notes, profile.midiProgram, tempos, gate, harmony); pcmToWav(pcm, 44100, 1) }
+            AudioOutputFormat.M4A -> { val pcm = generatePcm(profile.notes, profile.midiProgram, tempos, gate, harmony); pcmToM4a(context, pcm, 44100, 1) }
+            AudioOutputFormat.MIDI -> notesToMidi(profile.notes, profile.midiProgram, tempos, gate, harmony)
+        }
+    }
+
+    /**
+     * Writes the profile's audio to app cache and returns a shareable FileProvider
+     * content Uri (used for the system share sheet). The file lives under cache/shared.
+     */
+    fun exportToCacheUri(context: Context, profile: RingtoneProfile): Uri {
+        val format = formatOf(profile)
+        val bytes = generateBytes(context, profile)
+        val dir = File(context.cacheDir, "shared").apply { mkdirs() }
+        val safeName = profile.contactName.ifBlank { "ringtone" }.replace(Regex("[^a-zA-Z0-9_]"), "_")
+        val file = File(dir, "${safeName}_${profile.seed}.${format.extension}")
+        file.writeBytes(bytes)
+        return androidx.core.content.FileProvider.getUriForFile(
+            context, "${context.packageName}.fileprovider", file
+        )
     }
 
     private fun pcmToWav(pcm: ByteArray, sampleRate: Int, channels: Int): ByteArray {

@@ -1,6 +1,9 @@
 package com.example.ringtoneid.ui.detail
 
 import android.content.Context
+import android.media.RingtoneManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ringtoneid.audio.AudioOutputFormat
@@ -13,6 +16,7 @@ import com.example.ringtoneid.audio.MusicalKeys
 import com.example.ringtoneid.audio.MusicalStyles
 import com.example.ringtoneid.audio.Octaves
 import com.example.ringtoneid.audio.RingtoneGenerator
+import com.example.ringtoneid.audio.RingtonePurpose
 import com.example.ringtoneid.audio.Tempo
 import com.example.ringtoneid.audio.TempoContours
 import com.example.ringtoneid.data.history.VariationStore
@@ -28,10 +32,12 @@ import com.example.ringtoneid.domain.usecase.from
 import com.example.ringtoneid.domain.usecase.fromPresetPool
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface DetailUiState {
@@ -43,7 +49,10 @@ sealed interface DetailUiState {
         val isPlaying: Boolean = false,
         val isSaving: Boolean = false,
         val savedSuccess: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        val message: String? = null,
+        val shareUri: Uri? = null,
+        val needsWriteSettings: Boolean = false
     ) : DetailUiState
     data class Error(val message: String) : DetailUiState
 }
@@ -282,6 +291,82 @@ class RingtoneDetailViewModel @Inject constructor(
                 state.copy(isSaving = false, error = result.exceptionOrNull()?.message ?: "Failed to set ringtone")
             }
         }
+    }
+
+    /** Export the current tune to cache and trigger the system share sheet. */
+    fun shareCurrent() {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        ringtoneGenerator.stopPreview()
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) { ringtoneGenerator.exportToCacheUri(context, state.profile) }
+            }
+            val current = _uiState.value as? DetailUiState.Ready ?: return@launch
+            _uiState.value = result.fold(
+                onSuccess = { current.copy(isPlaying = false, shareUri = it) },
+                onFailure = { current.copy(error = it.message ?: "Failed to export ringtone") }
+            )
+        }
+    }
+
+    fun shareHandled() {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        _uiState.value = state.copy(shareUri = null)
+    }
+
+    private var pendingDefaultPurpose: RingtonePurpose? = null
+
+    /**
+     * Install the current tune as the device-wide default ringtone/notification/alarm
+     * sound. Requires WRITE_SETTINGS; if not yet granted, signals the UI to request it.
+     */
+    fun setAsDefault(purpose: RingtonePurpose) {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        if (!Settings.System.canWrite(context)) {
+            pendingDefaultPurpose = purpose
+            _uiState.value = state.copy(needsWriteSettings = true)
+            return
+        }
+        ringtoneGenerator.stopPreview()
+        viewModelScope.launch {
+            _uiState.value = state.copy(isSaving = true)
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val uri = ringtoneGenerator.generateAndSave(context, state.profile, purpose)
+                    RingtoneManager.setActualDefaultRingtoneUri(context, ringtoneManagerType(purpose), uri)
+                }
+            }
+            val current = _uiState.value as? DetailUiState.Ready ?: return@launch
+            _uiState.value = result.fold(
+                onSuccess = { current.copy(isSaving = false, isPlaying = false, message = "Set as default ${purpose.name.lowercase()}") },
+                onFailure = { current.copy(isSaving = false, error = it.message ?: "Failed to set default sound") }
+            )
+        }
+    }
+
+    /** Called by the UI after returning from the WRITE_SETTINGS permission screen. */
+    fun onWriteSettingsResult() {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        _uiState.value = state.copy(needsWriteSettings = false)
+        val purpose = pendingDefaultPurpose ?: return
+        pendingDefaultPurpose = null
+        if (Settings.System.canWrite(context)) {
+            setAsDefault(purpose)
+        } else {
+            _uiState.value = (_uiState.value as? DetailUiState.Ready ?: state)
+                .copy(message = "Permission denied — can't set default sound")
+        }
+    }
+
+    fun messageShown() {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        _uiState.value = state.copy(message = null, error = null)
+    }
+
+    private fun ringtoneManagerType(purpose: RingtonePurpose): Int = when (purpose) {
+        RingtonePurpose.RINGTONE -> RingtoneManager.TYPE_RINGTONE
+        RingtonePurpose.NOTIFICATION -> RingtoneManager.TYPE_NOTIFICATION
+        RingtonePurpose.ALARM -> RingtoneManager.TYPE_ALARM
     }
 
     override fun onCleared() {
