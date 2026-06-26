@@ -1,35 +1,54 @@
 package com.example.ringtoneid.ui.settings
 
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.example.ringtoneid.audio.AudioOutputFormat
-import com.example.ringtoneid.audio.MidiInstruments
-import com.example.ringtoneid.audio.MusicalKeys
-import com.example.ringtoneid.audio.MusicalStyles
-import androidx.compose.material3.RangeSlider
-import com.example.ringtoneid.audio.Articulations
-import com.example.ringtoneid.audio.Harmonies
-import com.example.ringtoneid.audio.MelodicContours
-import com.example.ringtoneid.audio.MotifRepeat
-import com.example.ringtoneid.audio.Octaves
-import com.example.ringtoneid.audio.Tempo
-import com.example.ringtoneid.audio.TempoContours
+import com.example.ringtoneid.domain.model.GenerationPreset
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,469 +76,46 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Default format section
+            // Profile presets header
             item {
                 Text(
-                    "Default Audio Format",
+                    "Profile Presets",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 )
                 Text(
-                    "New ringtones will use this format unless overridden per-contact.",
+                    "Generating for all contacts picks a random preset from this pool — higher " +
+                        "weight means chosen more often. Contacts that already have a custom " +
+                        "ringtone are never overwritten.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp)
                 )
                 Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    AudioOutputFormat.entries.forEach { fmt ->
-                        FilterChip(
-                            selected = uiState.defaultFormat.equals(fmt.name, ignoreCase = true),
-                            onClick = { viewModel.setDefaultFormat(fmt.name.lowercase()) },
-                            label = { Text(fmt.label) }
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
+            }
+
+            items(uiState.presets, key = { it.id }) { preset ->
+                PresetItem(
+                    preset = preset,
+                    expanded = uiState.editingPresetId == preset.id,
+                    isSampling = uiState.isSampling,
+                    canDelete = uiState.presets.size > 1,
+                    viewModel = viewModel
+                )
                 HorizontalDivider()
             }
 
-            // Default instrument section
             item {
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    "Default Instrument",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-                val currentInstrument = MidiInstruments.findByProgram(uiState.defaultInstrument)
-                var instrumentExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = instrumentExpanded,
-                    onExpandedChange = { instrumentExpanded = it },
+                Button(
+                    onClick = { viewModel.addPreset() },
                     modifier = Modifier.padding(horizontal = 16.dp)
                 ) {
-                    OutlinedTextField(
-                        value = currentInstrument.name,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = instrumentExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = instrumentExpanded,
-                        onDismissRequest = { instrumentExpanded = false }
-                    ) {
-                        var lastCategory = ""
-                        MidiInstruments.instruments.forEach { instrument ->
-                            if (instrument.category != lastCategory) {
-                                lastCategory = instrument.category
-                                Text(
-                                    instrument.category,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                                )
-                            }
-                            DropdownMenuItem(
-                                text = { Text(instrument.name) },
-                                onClick = {
-                                    viewModel.setDefaultInstrument(instrument.program)
-                                    instrumentExpanded = false
-                                }
-                            )
-                        }
-                    }
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Add preset")
                 }
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-            }
-
-            // Default length section
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Default Length",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-                Text(
-                    "${uiState.defaultLength} notes",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Slider(
-                    value = uiState.defaultLength.toFloat(),
-                    onValueChange = { viewModel.setDefaultLength(it.roundToInt()) },
-                    valueRange = 4f..16f,
-                    steps = 11,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                )
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("4", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("16", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Spacer(Modifier.height(8.dp))
-
-                // Sample button
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            if (uiState.isSampling) viewModel.stopSample() else viewModel.playSample()
-                        }
-                    ) {
-                        Text(if (uiState.isSampling) "⏹ Stop" else "▶ Sample")
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-            }
-
-            // Default musical style section
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Musical Style",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-                Text(
-                    "Controls the scale (and mood) used to turn phone digits into a melody.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Spacer(Modifier.height(8.dp))
-                val currentStyle = MusicalStyles.fromId(uiState.defaultStyle)
-                var styleExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = styleExpanded,
-                    onExpandedChange = { styleExpanded = it },
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    OutlinedTextField(
-                        value = "${currentStyle.displayName} — ${currentStyle.description}",
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = styleExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = styleExpanded,
-                        onDismissRequest = { styleExpanded = false }
-                    ) {
-                        MusicalStyles.ALL.forEach { style ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(style.displayName, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            style.description,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    viewModel.setDefaultStyle(style.id)
-                                    styleExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Key",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                val currentKey = MusicalKeys.nameForRoot(uiState.defaultRoot)
-                var keyExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = keyExpanded,
-                    onExpandedChange = { keyExpanded = it },
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    OutlinedTextField(
-                        value = currentKey,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = keyExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = keyExpanded,
-                        onDismissRequest = { keyExpanded = false }
-                    ) {
-                        MusicalKeys.ALL.forEach { key ->
-                            DropdownMenuItem(
-                                text = { Text(key.displayName) },
-                                onClick = {
-                                    viewModel.setDefaultRoot(key.rootNote)
-                                    keyExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Tempo: ${uiState.defaultTempoMin}–${uiState.defaultTempoMax} BPM",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                RangeSlider(
-                    value = uiState.defaultTempoMin.toFloat()..uiState.defaultTempoMax.toFloat(),
-                    onValueChange = { viewModel.setDefaultTempoRange(it.start.roundToInt(), it.endInclusive.roundToInt()) },
-                    valueRange = Tempo.MIN_BPM.toFloat()..Tempo.MAX_BPM.toFloat(),
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                )
-                Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("${Tempo.MIN_BPM} (slow)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${Tempo.MAX_BPM} (fast)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Tempo motion",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                var tempoContourExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = tempoContourExpanded,
-                    onExpandedChange = { tempoContourExpanded = it },
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    OutlinedTextField(
-                        value = TempoContours.fromId(uiState.defaultTempoContour).displayName,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tempoContourExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = tempoContourExpanded,
-                        onDismissRequest = { tempoContourExpanded = false }
-                    ) {
-                        TempoContours.ALL.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(option.displayName, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            option.description,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    viewModel.setDefaultTempoContour(option.id)
-                                    tempoContourExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-            }
-
-            // Melody section
-            item {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    "Melody",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-                )
-
-                var contourExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = contourExpanded,
-                    onExpandedChange = { contourExpanded = it },
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    OutlinedTextField(
-                        value = MelodicContours.fromId(uiState.defaultContour).displayName,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Contour") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = contourExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = contourExpanded,
-                        onDismissRequest = { contourExpanded = false }
-                    ) {
-                        MelodicContours.ALL.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(option.displayName, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            option.description,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    viewModel.setDefaultContour(option.id)
-                                    contourExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Register",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Octaves.ALL.forEach { option ->
-                        FilterChip(
-                            selected = uiState.defaultOctave == option.shift,
-                            onClick = { viewModel.setDefaultOctave(option.shift) },
-                            label = { Text(option.displayName) }
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Repeat phrase: ${uiState.defaultRepeat}×",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Slider(
-                    value = uiState.defaultRepeat.toFloat(),
-                    onValueChange = { viewModel.setDefaultRepeat(it.roundToInt()) },
-                    valueRange = MotifRepeat.MIN.toFloat()..MotifRepeat.MAX.toFloat(),
-                    steps = MotifRepeat.MAX - MotifRepeat.MIN - 1,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
-                )
-
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    "Articulation",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
-                Spacer(Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Articulations.ALL.forEach { option ->
-                        FilterChip(
-                            selected = uiState.defaultArticulation == option.id,
-                            onClick = { viewModel.setDefaultArticulation(option.id) },
-                            label = { Text(option.displayName) }
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-                var harmonyExpanded by remember { mutableStateOf(false) }
-                ExposedDropdownMenuBox(
-                    expanded = harmonyExpanded,
-                    onExpandedChange = { harmonyExpanded = it },
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    OutlinedTextField(
-                        value = Harmonies.fromId(uiState.defaultHarmony).displayName,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Harmony") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = harmonyExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth()
-                    )
-                    ExposedDropdownMenu(
-                        expanded = harmonyExpanded,
-                        onDismissRequest = { harmonyExpanded = false }
-                    ) {
-                        Harmonies.ALL.forEach { option ->
-                            DropdownMenuItem(
-                                text = {
-                                    Column {
-                                        Text(option.displayName, fontWeight = FontWeight.Bold)
-                                        Text(
-                                            option.description,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                onClick = {
-                                    viewModel.setDefaultHarmony(option.id)
-                                    harmonyExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider()
-            }
-
-            // Reset to defaults section
-            item {
-                Spacer(Modifier.height(8.dp))
-                OutlinedButton(
-                    onClick = { viewModel.resetToDefaults() },
-                    enabled = !uiState.isAtDefaults,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                ) {
-                    Text("Reset all to defaults")
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    if (uiState.isAtDefaults) "Using factory defaults" else "Customized",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp)
-                )
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
             }
@@ -547,7 +143,7 @@ fun SettingsScreen(
 
                 ListItem(
                     headlineContent = { Text("Background sync") },
-                    supportingContent = { Text("Periodically check for new contacts and generate ringtones (daily)") },
+                    supportingContent = { Text("Periodically check for new contacts and generate ringtones") },
                     trailingContent = {
                         Switch(
                             checked = uiState.backgroundSync,
@@ -661,6 +257,127 @@ fun SettingsScreen(
                     }
                 }
                 Spacer(Modifier.height(32.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PresetItem(
+    preset: GenerationPreset,
+    expanded: Boolean,
+    isSampling: Boolean,
+    canDelete: Boolean,
+    viewModel: SettingsViewModel
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable { viewModel.selectPreset(preset.id) }
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Switch(
+                checked = preset.enabled,
+                onCheckedChange = { viewModel.setPresetEnabled(preset.id, it) }
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    preset.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Weight ${preset.weight}" + if (!preset.enabled) " · disabled" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Icon(
+                if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                contentDescription = if (expanded) "Collapse" else "Expand"
+            )
+        }
+
+        if (expanded) {
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                OutlinedTextField(
+                    value = preset.name,
+                    onValueChange = { viewModel.renamePreset(preset.id, it) },
+                    label = { Text("Preset name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "Weight: ${preset.weight}",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
+                Slider(
+                    value = preset.weight.toFloat(),
+                    onValueChange = { viewModel.setPresetWeight(preset.id, it.roundToInt()) },
+                    valueRange = 1f..10f,
+                    steps = 8,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(Modifier.height(8.dp))
+                GenerationControls(
+                    settings = preset.settings,
+                    onFormat = viewModel::setFormat,
+                    onInstrument = viewModel::setInstrument,
+                    onLength = viewModel::setLength,
+                    onStyle = viewModel::setStyle,
+                    onRoot = viewModel::setRoot,
+                    onTempoRange = viewModel::setTempoRange,
+                    onTempoContour = viewModel::setTempoContour,
+                    onContour = viewModel::setContour,
+                    onOctave = viewModel::setOctave,
+                    onRepeat = viewModel::setRepeat,
+                    onArticulation = viewModel::setArticulation,
+                    onHarmony = viewModel::setHarmony
+                )
+
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            if (isSampling) viewModel.stopSample() else viewModel.playSample()
+                        }
+                    ) {
+                        Text(if (isSampling) "⏹ Stop" else "▶ Sample")
+                    }
+                    OutlinedButton(onClick = { viewModel.duplicatePreset(preset.id) }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Duplicate")
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { viewModel.resetEditingToFactory() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Reset to factory")
+                    }
+                    if (canDelete) {
+                        TextButton(
+                            onClick = { viewModel.deletePreset(preset.id) },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                contentColor = MaterialTheme.colorScheme.error
+                            )
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Delete")
+                        }
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
             }
         }
     }

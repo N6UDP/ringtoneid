@@ -5,7 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.ringtoneid.domain.model.Contact
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
-import com.example.ringtoneid.domain.usecase.fromDefaults
+import com.example.ringtoneid.domain.usecase.fromPresetPool
 import com.example.ringtoneid.domain.usecase.GetContactsUseCase
 import com.example.ringtoneid.domain.usecase.SetContactRingtoneUseCase
 import com.example.ringtoneid.domain.repository.ContactsRepository
@@ -68,7 +68,7 @@ class ContactListViewModel @Inject constructor(
                         message = "Auto-generating: ${contact.name} (${index + 1}/$total)"
                     )
                     try {
-                        val profile = generateRingtoneUseCase.fromDefaults(context, contact)
+                        val profile = generateRingtoneUseCase.fromPresetPool(context, contact)
                         setContactRingtoneUseCase(profile)
                     } catch (_: Exception) {}
                 }
@@ -103,7 +103,7 @@ class ContactListViewModel @Inject constructor(
                     message = "Setting ringtone for ${contact.name} (${index + 1}/$total)"
                 )
                 try {
-                    val profile = generateRingtoneUseCase.fromDefaults(context, contact)
+                    val profile = generateRingtoneUseCase.fromPresetPool(context, contact)
                     setContactRingtoneUseCase(profile)
                 } catch (_: Exception) {
                     // Skip failures on individual contacts

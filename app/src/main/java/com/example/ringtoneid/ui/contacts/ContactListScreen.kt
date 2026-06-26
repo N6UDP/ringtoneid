@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -31,6 +32,7 @@ import com.example.ringtoneid.domain.model.Contact
 fun ContactListScreen(
     onContactClick: (Long) -> Unit,
     onSettingsClick: () -> Unit,
+    onFavoritesClick: () -> Unit,
     viewModel: ContactListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -83,6 +85,9 @@ fun ContactListScreen(
             TopAppBar(
                 title = { Text("Ringtone ID") },
                 actions = {
+                    IconButton(onClick = onFavoritesClick) {
+                        Icon(Icons.Default.Favorite, contentDescription = "Favorites")
+                    }
                     IconButton(onClick = onSettingsClick) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }

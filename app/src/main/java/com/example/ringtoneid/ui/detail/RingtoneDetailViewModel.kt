@@ -12,16 +12,20 @@ import com.example.ringtoneid.audio.MotifRepeat
 import com.example.ringtoneid.audio.MusicalKeys
 import com.example.ringtoneid.audio.MusicalStyles
 import com.example.ringtoneid.audio.Octaves
-import com.example.ringtoneid.audio.RingtoneDefaults
 import com.example.ringtoneid.audio.RingtoneGenerator
 import com.example.ringtoneid.audio.Tempo
 import com.example.ringtoneid.audio.TempoContours
+import com.example.ringtoneid.data.history.VariationStore
 import com.example.ringtoneid.domain.model.Contact
+import com.example.ringtoneid.domain.model.GenerationSettings
 import com.example.ringtoneid.domain.model.RingtoneProfile
+import com.example.ringtoneid.domain.model.Variation
 import com.example.ringtoneid.domain.repository.ContactsRepository
 import com.example.ringtoneid.domain.repository.RingtoneRepository
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
 import com.example.ringtoneid.domain.usecase.SetContactRingtoneUseCase
+import com.example.ringtoneid.domain.usecase.from
+import com.example.ringtoneid.domain.usecase.fromPresetPool
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,6 +39,7 @@ sealed interface DetailUiState {
     data class Ready(
         val contact: Contact,
         val profile: RingtoneProfile,
+        val history: List<Variation> = emptyList(),
         val isPlaying: Boolean = false,
         val isSaving: Boolean = false,
         val savedSuccess: Boolean = false,
@@ -42,22 +47,6 @@ sealed interface DetailUiState {
     ) : DetailUiState
     data class Error(val message: String) : DetailUiState
 }
-
-private data class GenDefaults(
-    val format: String,
-    val instrument: Int,
-    val length: Int,
-    val style: String,
-    val root: Int,
-    val tempoMin: Int,
-    val tempoMax: Int,
-    val tempoContour: String,
-    val contour: String,
-    val octave: Int,
-    val repeat: Int,
-    val articulation: String,
-    val harmony: String
-)
 
 @HiltViewModel
 class RingtoneDetailViewModel @Inject constructor(
@@ -72,32 +61,9 @@ class RingtoneDetailViewModel @Inject constructor(
     private val _uiState = MutableStateFlow<DetailUiState>(DetailUiState.Loading)
     val uiState: StateFlow<DetailUiState> = _uiState.asStateFlow()
 
-    private fun readDefaults(): GenDefaults {
-        val prefs = context.getSharedPreferences("ringtone_id_prefs", Context.MODE_PRIVATE)
-        return GenDefaults(
-            format = prefs.getString("default_format", RingtoneDefaults.FORMAT) ?: RingtoneDefaults.FORMAT,
-            instrument = prefs.getInt("default_instrument", RingtoneDefaults.INSTRUMENT),
-            length = prefs.getInt("default_length", RingtoneDefaults.LENGTH),
-            style = prefs.getString("default_style", RingtoneDefaults.STYLE) ?: RingtoneDefaults.STYLE,
-            root = prefs.getInt("default_root", RingtoneDefaults.ROOT),
-            tempoMin = prefs.getInt("default_tempo_min", prefs.getInt("default_tempo", RingtoneDefaults.TEMPO)),
-            tempoMax = prefs.getInt("default_tempo_max", prefs.getInt("default_tempo", RingtoneDefaults.TEMPO)),
-            tempoContour = prefs.getString("default_tempo_contour", RingtoneDefaults.TEMPO_CONTOUR) ?: RingtoneDefaults.TEMPO_CONTOUR,
-            contour = prefs.getString("default_contour", RingtoneDefaults.CONTOUR) ?: RingtoneDefaults.CONTOUR,
-            octave = prefs.getInt("default_octave", RingtoneDefaults.OCTAVE),
-            repeat = prefs.getInt("default_repeat", RingtoneDefaults.REPEAT),
-            articulation = prefs.getString("default_articulation", RingtoneDefaults.ARTICULATION) ?: RingtoneDefaults.ARTICULATION,
-            harmony = prefs.getString("default_harmony", RingtoneDefaults.HARMONY) ?: RingtoneDefaults.HARMONY
-        )
-    }
-
-    private fun generateFromDefaults(contact: Contact): RingtoneProfile {
-        val d = readDefaults()
-        return generateRingtoneUseCase(
-            contact, 0, d.length, d.format, d.instrument, d.style, d.root,
-            d.tempoMin, d.tempoMax, d.tempoContour, d.contour, d.octave, d.repeat, d.articulation, d.harmony
-        )
-    }
+    /** Initial generation for a contact with no saved ringtone uses the preset pool. */
+    private fun generateFromDefaults(contact: Contact): RingtoneProfile =
+        generateRingtoneUseCase.fromPresetPool(context, contact)
 
     private fun regen(
         contact: Contact,
@@ -136,8 +102,50 @@ class RingtoneDetailViewModel @Inject constructor(
             }
             val existingProfile = ringtoneRepository.getRingtoneForContact(contactId)
             val profile = existingProfile ?: generateFromDefaults(contact)
-            _uiState.value = DetailUiState.Ready(contact = contact, profile = profile)
+            _uiState.value = DetailUiState.Ready(
+                contact = contact,
+                profile = profile,
+                history = VariationStore.historyFor(context, contactId)
+            )
         }
+    }
+
+    /** Snapshots the current profile into this contact's history (deduped + capped). */
+    private fun recordCurrent(state: DetailUiState.Ready, favorite: Boolean = false) {
+        val variation = Variation(
+            contactId = state.contact.id,
+            contactName = state.contact.name,
+            phoneNumber = state.contact.phoneNumber,
+            seed = state.profile.seed,
+            settings = GenerationSettings.fromProfile(state.profile),
+            favorite = favorite
+        )
+        VariationStore.record(context, variation)
+        _uiState.value = state.copy(history = VariationStore.historyFor(context, state.contact.id))
+    }
+
+    /** Restore a saved variation as the current profile. */
+    fun restoreVariation(variation: Variation) {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        apply(generateRingtoneUseCase.from(state.contact, variation.settings, variation.seed))
+    }
+
+    fun toggleFavorite(variation: Variation) {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        VariationStore.setFavorite(context, state.contact.id, variation.id, !variation.favorite)
+        _uiState.value = state.copy(history = VariationStore.historyFor(context, state.contact.id))
+    }
+
+    fun deleteVariation(variation: Variation) {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        VariationStore.delete(context, state.contact.id, variation.id)
+        _uiState.value = state.copy(history = VariationStore.historyFor(context, state.contact.id))
+    }
+
+    /** Save the current variation explicitly as a favorite. */
+    fun favoriteCurrent() {
+        val state = _uiState.value as? DetailUiState.Ready ?: return
+        recordCurrent(state, favorite = true)
     }
 
     fun shuffleSeed() {
@@ -220,7 +228,7 @@ class RingtoneDetailViewModel @Inject constructor(
 
     fun resetToDefaults() {
         val state = _uiState.value as? DetailUiState.Ready ?: return
-        apply(generateFromDefaults(state.contact))
+        apply(generateRingtoneUseCase.from(state.contact, GenerationSettings.FACTORY, seed = 0))
     }
 
     fun surprise() {
@@ -255,6 +263,8 @@ class RingtoneDetailViewModel @Inject constructor(
         } else {
             ringtoneGenerator.preview(context, state.profile)
             _uiState.value = state.copy(isPlaying = true)
+            // Snapshot the tune the user is auditioning so they can return to it later.
+            recordCurrent(_uiState.value as DetailUiState.Ready)
         }
     }
 
@@ -265,7 +275,9 @@ class RingtoneDetailViewModel @Inject constructor(
             ringtoneGenerator.stopPreview()
             val result = setContactRingtoneUseCase(state.profile)
             _uiState.value = if (result.isSuccess) {
-                state.copy(isSaving = false, isPlaying = false, savedSuccess = true)
+                recordCurrent(state)
+                val refreshed = _uiState.value as? DetailUiState.Ready ?: state
+                refreshed.copy(isSaving = false, isPlaying = false, savedSuccess = true)
             } else {
                 state.copy(isSaving = false, error = result.exceptionOrNull()?.message ?: "Failed to set ringtone")
             }

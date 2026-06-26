@@ -15,6 +15,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -42,6 +46,7 @@ import com.example.ringtoneid.audio.TempoContours
 import kotlin.math.sin
 import kotlin.math.abs
 import kotlin.math.roundToInt
+import com.example.ringtoneid.domain.model.Variation
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -205,6 +210,18 @@ fun RingtoneDetailScreen(
                         TextButton(onClick = { viewModel.resetToDefaults() }) {
                             Text("Reset to defaults")
                         }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    TextButton(onClick = { viewModel.favoriteCurrent() }) {
+                        Icon(
+                            Icons.Filled.Favorite,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text("Save to favorites")
                     }
 
                     Spacer(Modifier.height(20.dp))
@@ -562,6 +579,83 @@ fun RingtoneDetailScreen(
                                         harmonyExpanded = false
                                     }
                                 )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(24.dp))
+
+                    // History section
+                    HorizontalDivider()
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "History",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "Tunes you've played — tap restore to bring one back",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    if (state.history.isEmpty()) {
+                        Text(
+                            "No history yet — play a few variations.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } else {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            state.history.forEach { v ->
+                                val styleLabel = MusicalStyles.fromId(v.settings.style).displayName
+                                val instrumentLabel = MidiInstruments.findByProgram(v.settings.instrument).name
+                                val tempoLabel = "${v.settings.tempoMin}-${v.settings.tempoMax} BPM"
+                                Card(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "$styleLabel · $instrumentLabel · seed ${v.seed}",
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium
+                                            )
+                                            Text(
+                                                tempoLabel,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.toggleFavorite(v) }) {
+                                            Icon(
+                                                imageVector = if (v.favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                                                contentDescription = if (v.favorite) "Remove from favorites" else "Add to favorites",
+                                                tint = if (v.favorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.restoreVariation(v) }) {
+                                            Icon(
+                                                imageVector = Icons.Filled.RestartAlt,
+                                                contentDescription = "Restore variation"
+                                            )
+                                        }
+                                        IconButton(onClick = { viewModel.deleteVariation(v) }) {
+                                            Icon(
+                                                imageVector = Icons.Filled.Delete,
+                                                contentDescription = "Delete variation",
+                                                tint = MaterialTheme.colorScheme.error
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

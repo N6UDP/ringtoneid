@@ -8,6 +8,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.ringtoneid.ui.contacts.ContactListScreen
 import com.example.ringtoneid.ui.detail.RingtoneDetailScreen
+import com.example.ringtoneid.ui.favorites.FavoritesScreen
 import com.example.ringtoneid.ui.settings.SettingsScreen
 
 sealed class Screen(val route: String) {
@@ -16,6 +17,7 @@ sealed class Screen(val route: String) {
         fun createRoute(contactId: Long) = "detail/$contactId"
     }
     object Settings : Screen("settings")
+    object Favorites : Screen("favorites")
 }
 
 @Composable
@@ -29,6 +31,9 @@ fun RingtoneIdNavGraph() {
                 },
                 onSettingsClick = {
                     navController.navigate(Screen.Settings.route)
+                },
+                onFavoritesClick = {
+                    navController.navigate(Screen.Favorites.route)
                 }
             )
         }
@@ -44,6 +49,9 @@ fun RingtoneIdNavGraph() {
         }
         composable(Screen.Settings.route) {
             SettingsScreen(onBack = { navController.popBackStack() })
+        }
+        composable(Screen.Favorites.route) {
+            FavoritesScreen(onBack = { navController.popBackStack() })
         }
     }
 }

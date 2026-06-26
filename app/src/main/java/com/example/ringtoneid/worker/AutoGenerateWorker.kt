@@ -9,7 +9,7 @@ import com.example.ringtoneid.domain.repository.ContactsRepository
 import com.example.ringtoneid.domain.repository.RingtoneRepository
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
 import com.example.ringtoneid.domain.usecase.SetContactRingtoneUseCase
-import com.example.ringtoneid.domain.usecase.fromDefaults
+import com.example.ringtoneid.domain.usecase.fromPresetPool
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
@@ -33,7 +33,7 @@ class AutoGenerateWorker @AssistedInject constructor(
 
             for (contact in newContacts) {
                 try {
-                    val profile = generateRingtoneUseCase.fromDefaults(applicationContext, contact)
+                    val profile = generateRingtoneUseCase.fromPresetPool(applicationContext, contact)
                     setContactRingtoneUseCase(profile)
                 } catch (_: Exception) {}
             }

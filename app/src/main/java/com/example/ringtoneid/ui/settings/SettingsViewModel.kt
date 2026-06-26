@@ -7,13 +7,15 @@ import androidx.work.Constraints
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
-import com.example.ringtoneid.audio.RingtoneDefaults
 import com.example.ringtoneid.audio.RingtoneGenerator
+import com.example.ringtoneid.data.preset.PresetStore
 import com.example.ringtoneid.domain.model.Contact
+import com.example.ringtoneid.domain.model.GenerationPreset
+import com.example.ringtoneid.domain.model.GenerationSettings
 import com.example.ringtoneid.domain.model.RingtoneProfile
 import com.example.ringtoneid.domain.repository.RingtoneRepository
 import com.example.ringtoneid.domain.usecase.GenerateRingtoneUseCase
-import com.example.ringtoneid.domain.usecase.fromDefaults
+import com.example.ringtoneid.domain.usecase.from
 import com.example.ringtoneid.worker.AutoGenerateWorker
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -28,26 +30,18 @@ import javax.inject.Inject
 
 data class SettingsUiState(
     val savedRingtones: List<RingtoneProfile> = emptyList(),
-    val defaultFormat: String = "wav",
-    val defaultInstrument: Int = 0,
-    val defaultLength: Int = 8,
-    val defaultStyle: String = "major",
-    val defaultRoot: Int = 60,
-    val defaultTempoMin: Int = 150,
-    val defaultTempoMax: Int = 150,
-    val defaultTempoContour: String = "steady",
-    val defaultContour: String = "asis",
-    val defaultOctave: Int = 0,
-    val defaultRepeat: Int = 1,
-    val defaultArticulation: String = "normal",
-    val defaultHarmony: String = "none",
+    val presets: List<GenerationPreset> = emptyList(),
+    /** Id of the preset whose generation controls are expanded for editing, or null. */
+    val editingPresetId: String? = null,
     val generateOnLaunch: Boolean = false,
     val backgroundSync: Boolean = false,
     val syncInterval: String = "daily",
     val isSampling: Boolean = false,
-    val isLoading: Boolean = true,
-    val isAtDefaults: Boolean = true
-)
+    val isLoading: Boolean = true
+) {
+    val editingPreset: GenerationPreset?
+        get() = presets.find { it.id == editingPresetId }
+}
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -69,155 +63,103 @@ class SettingsViewModel @Inject constructor(
         settings.copy(savedRingtones = ringtones, isLoading = false)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), SettingsUiState())
 
-    private fun loadSettings(): SettingsUiState {
-        val legacyTempo = prefs.getInt("default_tempo", RingtoneDefaults.TEMPO)
-        return SettingsUiState(
-            defaultFormat = prefs.getString("default_format", RingtoneDefaults.FORMAT) ?: RingtoneDefaults.FORMAT,
-            defaultInstrument = prefs.getInt("default_instrument", RingtoneDefaults.INSTRUMENT),
-            defaultLength = prefs.getInt("default_length", RingtoneDefaults.LENGTH),
-            defaultStyle = prefs.getString("default_style", RingtoneDefaults.STYLE) ?: RingtoneDefaults.STYLE,
-            defaultRoot = prefs.getInt("default_root", RingtoneDefaults.ROOT),
-            defaultTempoMin = prefs.getInt("default_tempo_min", legacyTempo),
-            defaultTempoMax = prefs.getInt("default_tempo_max", legacyTempo),
-            defaultTempoContour = prefs.getString("default_tempo_contour", RingtoneDefaults.TEMPO_CONTOUR) ?: RingtoneDefaults.TEMPO_CONTOUR,
-            defaultContour = prefs.getString("default_contour", RingtoneDefaults.CONTOUR) ?: RingtoneDefaults.CONTOUR,
-            defaultOctave = prefs.getInt("default_octave", RingtoneDefaults.OCTAVE),
-            defaultRepeat = prefs.getInt("default_repeat", RingtoneDefaults.REPEAT),
-            defaultArticulation = prefs.getString("default_articulation", RingtoneDefaults.ARTICULATION) ?: RingtoneDefaults.ARTICULATION,
-            defaultHarmony = prefs.getString("default_harmony", RingtoneDefaults.HARMONY) ?: RingtoneDefaults.HARMONY,
-            generateOnLaunch = prefs.getBoolean("generate_on_launch", false),
-            backgroundSync = prefs.getBoolean("background_sync", false),
-            syncInterval = prefs.getString("sync_interval", "daily") ?: "daily",
-            isSampling = sampling,
-            isLoading = false
-        ).withDefaultsFlag()
-    }
-
-    private fun SettingsUiState.withDefaultsFlag(): SettingsUiState = copy(
-        isAtDefaults = defaultFormat == RingtoneDefaults.FORMAT &&
-            defaultInstrument == RingtoneDefaults.INSTRUMENT &&
-            defaultLength == RingtoneDefaults.LENGTH &&
-            defaultStyle == RingtoneDefaults.STYLE &&
-            defaultRoot == RingtoneDefaults.ROOT &&
-            defaultTempoMin == RingtoneDefaults.TEMPO &&
-            defaultTempoMax == RingtoneDefaults.TEMPO &&
-            defaultTempoContour == RingtoneDefaults.TEMPO_CONTOUR &&
-            defaultContour == RingtoneDefaults.CONTOUR &&
-            defaultOctave == RingtoneDefaults.OCTAVE &&
-            defaultRepeat == RingtoneDefaults.REPEAT &&
-            defaultArticulation == RingtoneDefaults.ARTICULATION &&
-            defaultHarmony == RingtoneDefaults.HARMONY
+    private fun loadSettings(): SettingsUiState = SettingsUiState(
+        presets = PresetStore.load(prefs),
+        generateOnLaunch = prefs.getBoolean("generate_on_launch", false),
+        backgroundSync = prefs.getBoolean("background_sync", false),
+        syncInterval = prefs.getString("sync_interval", "daily") ?: "daily",
+        isSampling = sampling,
+        isLoading = false
     )
 
-    private fun update(transform: (SettingsUiState) -> SettingsUiState) {
-        _settings.value = transform(_settings.value).withDefaultsFlag()
+    // --- Preset pool management ------------------------------------------------
+
+    /** Expand/collapse a preset's editor. Passing the same id again collapses it. */
+    fun selectPreset(id: String?) {
+        _settings.value = _settings.value.copy(
+            editingPresetId = if (_settings.value.editingPresetId == id) null else id
+        )
     }
 
-    fun setDefaultFormat(format: String) {
-        prefs.edit().putString("default_format", format).apply()
-        update { it.copy(defaultFormat = format) }
+    fun addPreset() {
+        val list = _settings.value.presets
+        val preset = GenerationPreset(
+            name = "Preset ${list.size + 1}",
+            settings = GenerationSettings.FACTORY
+        )
+        persist(list + preset)
+        _settings.value = _settings.value.copy(editingPresetId = preset.id)
     }
 
-    fun setDefaultInstrument(program: Int) {
-        prefs.edit().putInt("default_instrument", program).apply()
-        update { it.copy(defaultInstrument = program) }
+    fun duplicatePreset(id: String) {
+        val source = _settings.value.presets.find { it.id == id } ?: return
+        val copy = GenerationPreset(
+            name = "${source.name} copy",
+            enabled = source.enabled,
+            weight = source.weight,
+            settings = source.settings
+        )
+        persist(_settings.value.presets + copy)
+        _settings.value = _settings.value.copy(editingPresetId = copy.id)
     }
 
-    fun setDefaultLength(length: Int) {
-        prefs.edit().putInt("default_length", length).apply()
-        update { it.copy(defaultLength = length) }
+    fun deletePreset(id: String) {
+        val newList = _settings.value.presets.filterNot { it.id == id }
+        val newEditing = if (_settings.value.editingPresetId == id) null else _settings.value.editingPresetId
+        PresetStore.save(prefs, newList)
+        _settings.value = _settings.value.copy(presets = newList, editingPresetId = newEditing)
     }
 
-    fun setDefaultStyle(styleId: String) {
-        prefs.edit().putString("default_style", styleId).apply()
-        update { it.copy(defaultStyle = styleId) }
+    fun renamePreset(id: String, name: String) = mutatePreset(id) { it.copy(name = name) }
+
+    fun setPresetEnabled(id: String, enabled: Boolean) =
+        mutatePreset(id) { it.copy(enabled = enabled) }
+
+    fun setPresetWeight(id: String, weight: Int) =
+        mutatePreset(id) { it.copy(weight = weight.coerceIn(1, 10)) }
+
+    /** Reset the currently-edited preset's generation settings back to factory values. */
+    fun resetEditingToFactory() = mutateEditing { GenerationSettings.FACTORY }
+
+    // --- Generation-setting editors (operate on the edited preset) -------------
+
+    fun setFormat(format: String) = mutateEditing { it.copy(format = format) }
+    fun setInstrument(program: Int) = mutateEditing { it.copy(instrument = program) }
+    fun setLength(length: Int) = mutateEditing { it.copy(length = length) }
+    fun setStyle(styleId: String) = mutateEditing { it.copy(style = styleId) }
+    fun setRoot(rootNote: Int) = mutateEditing { it.copy(root = rootNote) }
+    fun setTempoRange(min: Int, max: Int) = mutateEditing { it.copy(tempoMin = min, tempoMax = max) }
+    fun setTempoContour(id: String) = mutateEditing { it.copy(tempoContour = id) }
+    fun setContour(id: String) = mutateEditing { it.copy(contour = id) }
+    fun setOctave(shift: Int) = mutateEditing { it.copy(octave = shift) }
+    fun setRepeat(count: Int) = mutateEditing { it.copy(repeat = count) }
+    fun setArticulation(id: String) = mutateEditing { it.copy(articulation = id) }
+    fun setHarmony(id: String) = mutateEditing { it.copy(harmony = id) }
+
+    private fun mutateEditing(transform: (GenerationSettings) -> GenerationSettings) {
+        val id = _settings.value.editingPresetId ?: return
+        mutatePreset(id) { it.copy(settings = transform(it.settings)) }
     }
 
-    fun setDefaultRoot(rootNote: Int) {
-        prefs.edit().putInt("default_root", rootNote).apply()
-        update { it.copy(defaultRoot = rootNote) }
+    private fun mutatePreset(id: String, transform: (GenerationPreset) -> GenerationPreset) {
+        persist(_settings.value.presets.map { if (it.id == id) transform(it) else it })
     }
 
-    fun setDefaultTempoRange(min: Int, max: Int) {
-        prefs.edit().putInt("default_tempo_min", min).putInt("default_tempo_max", max)
-            .putInt("default_tempo", (min + max) / 2).apply()
-        update { it.copy(defaultTempoMin = min, defaultTempoMax = max) }
+    private fun persist(list: List<GenerationPreset>) {
+        PresetStore.save(prefs, list)
+        _settings.value = _settings.value.copy(presets = list)
     }
 
-    fun setDefaultTempoContour(id: String) {
-        prefs.edit().putString("default_tempo_contour", id).apply()
-        update { it.copy(defaultTempoContour = id) }
-    }
-
-    fun setDefaultContour(id: String) {
-        prefs.edit().putString("default_contour", id).apply()
-        update { it.copy(defaultContour = id) }
-    }
-
-    fun setDefaultOctave(shift: Int) {
-        prefs.edit().putInt("default_octave", shift).apply()
-        update { it.copy(defaultOctave = shift) }
-    }
-
-    fun setDefaultRepeat(count: Int) {
-        prefs.edit().putInt("default_repeat", count).apply()
-        update { it.copy(defaultRepeat = count) }
-    }
-
-    fun setDefaultArticulation(id: String) {
-        prefs.edit().putString("default_articulation", id).apply()
-        update { it.copy(defaultArticulation = id) }
-    }
-
-    fun setDefaultHarmony(id: String) {
-        prefs.edit().putString("default_harmony", id).apply()
-        update { it.copy(defaultHarmony = id) }
-    }
-
-    fun resetToDefaults() {
-        prefs.edit()
-            .putString("default_format", RingtoneDefaults.FORMAT)
-            .putInt("default_instrument", RingtoneDefaults.INSTRUMENT)
-            .putInt("default_length", RingtoneDefaults.LENGTH)
-            .putString("default_style", RingtoneDefaults.STYLE)
-            .putInt("default_root", RingtoneDefaults.ROOT)
-            .putInt("default_tempo_min", RingtoneDefaults.TEMPO)
-            .putInt("default_tempo_max", RingtoneDefaults.TEMPO)
-            .putInt("default_tempo", RingtoneDefaults.TEMPO)
-            .putString("default_tempo_contour", RingtoneDefaults.TEMPO_CONTOUR)
-            .putString("default_contour", RingtoneDefaults.CONTOUR)
-            .putInt("default_octave", RingtoneDefaults.OCTAVE)
-            .putInt("default_repeat", RingtoneDefaults.REPEAT)
-            .putString("default_articulation", RingtoneDefaults.ARTICULATION)
-            .putString("default_harmony", RingtoneDefaults.HARMONY)
-            .apply()
-        update {
-            it.copy(
-                defaultFormat = RingtoneDefaults.FORMAT,
-                defaultInstrument = RingtoneDefaults.INSTRUMENT,
-                defaultLength = RingtoneDefaults.LENGTH,
-                defaultStyle = RingtoneDefaults.STYLE,
-                defaultRoot = RingtoneDefaults.ROOT,
-                defaultTempoMin = RingtoneDefaults.TEMPO,
-                defaultTempoMax = RingtoneDefaults.TEMPO,
-                defaultTempoContour = RingtoneDefaults.TEMPO_CONTOUR,
-                defaultContour = RingtoneDefaults.CONTOUR,
-                defaultOctave = RingtoneDefaults.OCTAVE,
-                defaultRepeat = RingtoneDefaults.REPEAT,
-                defaultArticulation = RingtoneDefaults.ARTICULATION,
-                defaultHarmony = RingtoneDefaults.HARMONY
-            )
-        }
-    }
+    // --- Bulk-generation behaviour toggles -------------------------------------
 
     fun setGenerateOnLaunch(enabled: Boolean) {
         prefs.edit().putBoolean("generate_on_launch", enabled).apply()
-        update { it.copy(generateOnLaunch = enabled) }
+        _settings.value = _settings.value.copy(generateOnLaunch = enabled)
     }
 
     fun setBackgroundSync(enabled: Boolean) {
         prefs.edit().putBoolean("background_sync", enabled).apply()
-        update { it.copy(backgroundSync = enabled) }
+        _settings.value = _settings.value.copy(backgroundSync = enabled)
         if (enabled) {
             scheduleBackgroundSync()
         } else {
@@ -227,7 +169,7 @@ class SettingsViewModel @Inject constructor(
 
     fun setSyncInterval(interval: String) {
         prefs.edit().putString("sync_interval", interval).apply()
-        update { it.copy(syncInterval = interval) }
+        _settings.value = _settings.value.copy(syncInterval = interval)
         if (_settings.value.backgroundSync) {
             scheduleBackgroundSync()
         }
@@ -256,20 +198,28 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { ringtoneRepository.deleteRingtone(profileId) }
     }
 
+    /** Plays a sample using the edited preset's settings (or the first preset / factory). */
     fun playSample() {
         ringtoneGenerator.stopPreview()
         val seed = (System.currentTimeMillis() % 10000).toInt()
+        val settings = sampleSettings()
         val sampleContact = Contact(id = -1L, name = "Sample", phoneNumber = "5551234567")
-        val profile = generateRingtoneUseCase.fromDefaults(context, sampleContact, seed)
+        val profile = generateRingtoneUseCase.from(sampleContact, settings, seed)
         sampling = true
-        update { it.copy(isSampling = true) }
+        _settings.value = _settings.value.copy(isSampling = true)
         ringtoneGenerator.preview(context, profile)
+    }
+
+    private fun sampleSettings(): GenerationSettings {
+        val st = _settings.value
+        val preset = st.editingPreset ?: st.presets.firstOrNull()
+        return preset?.settings ?: GenerationSettings.FACTORY
     }
 
     fun stopSample() {
         ringtoneGenerator.stopPreview()
         sampling = false
-        update { it.copy(isSampling = false) }
+        _settings.value = _settings.value.copy(isSampling = false)
     }
 
     override fun onCleared() {
