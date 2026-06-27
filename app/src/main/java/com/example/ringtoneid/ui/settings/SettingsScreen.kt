@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.example.ringtoneid.data.preset.BuiltInPresets
 import com.example.ringtoneid.domain.model.GenerationPreset
 import kotlin.math.roundToInt
 
@@ -116,6 +117,46 @@ fun SettingsScreen(
                     Spacer(Modifier.width(8.dp))
                     Text("Add preset")
                 }
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider()
+            }
+
+            // Starter styles gallery — curated genre presets the user can add & tweak.
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Starter Styles",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                )
+                Text(
+                    "Add a ready-made genre to your pool, then tweak it to taste.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+
+            items(BuiltInPresets.ALL, key = { it.name }) { builtIn ->
+                ListItem(
+                    headlineContent = { Text(builtIn.name, fontWeight = FontWeight.SemiBold) },
+                    supportingContent = {
+                        Text(builtIn.description, style = MaterialTheme.typography.bodySmall)
+                    },
+                    trailingContent = {
+                        TextButton(onClick = { viewModel.addBuiltIn(builtIn) }) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(4.dp))
+                            Text("Add")
+                        }
+                    }
+                )
+                HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
+            }
+
+            item {
                 Spacer(Modifier.height(8.dp))
                 HorizontalDivider()
             }

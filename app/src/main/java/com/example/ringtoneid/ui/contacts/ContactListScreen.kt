@@ -2,6 +2,7 @@ package com.example.ringtoneid.ui.contacts
 
 import android.Manifest
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -77,6 +78,10 @@ fun ContactListScreen(
         selectionMode = false
         selectedIds.clear()
     }
+
+    // While multi-selecting, the system back button should cancel selection rather than
+    // leave the app.
+    BackHandler(enabled = selectionMode) { exitSelection() }
 
     if (showRemoveAllDialog) {
         AlertDialog(

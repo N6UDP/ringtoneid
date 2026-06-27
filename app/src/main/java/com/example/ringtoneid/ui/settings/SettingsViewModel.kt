@@ -8,6 +8,8 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.example.ringtoneid.audio.RingtoneGenerator
+import com.example.ringtoneid.data.preset.BuiltInPreset
+import com.example.ringtoneid.data.preset.BuiltInPresets
 import com.example.ringtoneid.data.preset.PresetStore
 import com.example.ringtoneid.domain.model.Contact
 import com.example.ringtoneid.domain.model.GenerationPreset
@@ -101,6 +103,13 @@ class SettingsViewModel @Inject constructor(
         )
         persist(_settings.value.presets + copy)
         _settings.value = _settings.value.copy(editingPresetId = copy.id)
+    }
+
+    /** Add a curated genre starter into the pool and open it for tweaking. */
+    fun addBuiltIn(builtIn: BuiltInPreset) {
+        val preset = GenerationPreset(name = builtIn.name, settings = builtIn.settings)
+        persist(_settings.value.presets + preset)
+        _settings.value = _settings.value.copy(editingPresetId = preset.id)
     }
 
     fun deletePreset(id: String) {
@@ -207,7 +216,10 @@ class SettingsViewModel @Inject constructor(
         val profile = generateRingtoneUseCase.from(sampleContact, settings, seed)
         sampling = true
         _settings.value = _settings.value.copy(isSampling = true)
-        ringtoneGenerator.preview(context, profile)
+        ringtoneGenerator.preview(context, profile) {
+            sampling = false
+            _settings.value = _settings.value.copy(isSampling = false)
+        }
     }
 
     private fun sampleSettings(): GenerationSettings {

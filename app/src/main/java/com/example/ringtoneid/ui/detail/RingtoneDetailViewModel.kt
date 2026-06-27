@@ -270,7 +270,11 @@ class RingtoneDetailViewModel @Inject constructor(
             ringtoneGenerator.stopPreview()
             _uiState.value = state.copy(isPlaying = false)
         } else {
-            ringtoneGenerator.preview(context, state.profile)
+            ringtoneGenerator.preview(context, state.profile) {
+                // Playback finished on its own — reset the button back to "play".
+                val s = _uiState.value as? DetailUiState.Ready ?: return@preview
+                if (s.isPlaying) _uiState.value = s.copy(isPlaying = false)
+            }
             _uiState.value = state.copy(isPlaying = true)
             // Snapshot the tune the user is auditioning so they can return to it later.
             recordCurrent(_uiState.value as DetailUiState.Ready)

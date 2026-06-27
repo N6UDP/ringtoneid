@@ -12,6 +12,8 @@ import android.media.MediaMuxer
 import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import com.example.ringtoneid.domain.model.RingtoneProfile
 import java.io.ByteArrayOutputStream
@@ -22,6 +24,8 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.exp
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Singleton
@@ -29,6 +33,7 @@ class RingtoneGenerator @Inject constructor() {
 
     private var audioTrack: AudioTrack? = null
     private var mediaPlayer: MediaPlayer? = null
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
 
     /**
      * Maps a phone number onto a melody that always stays within the chosen
@@ -104,33 +109,50 @@ class RingtoneGenerator @Inject constructor() {
                 val rnd = java.util.Random(seed.toLong() * 101 + 7)
                 List(count) { min + rnd.nextInt(max - min + 1) }
             }
+            TempoContours.WAVE.id -> List(count) { i ->
+                // One full sine cycle across the tune so tempo eases up then back down.
+                val t = (sin(2 * PI * i / count) + 1.0) / 2.0
+                (min + (max - min) * t).roundToInt()
+            }
+            TempoContours.SWING.id -> List(count) { i ->
+                if (i % 2 == 0) min else max
+            }
             else -> List(count) { (min + max) / 2 }
         }
     }
 
     private fun midiToFrequency(midi: Int): Double = 440.0 * Math.pow(2.0, (midi - 69) / 12.0)
 
+    /**
+     * Per-instrument timbre. Built from band-limited additive partials (a small sum of
+     * sine harmonics) rather than raw discontinuous square/saw shapes — this is warmer
+     * and far less "buzzy"/aliased on a phone speaker while keeping each family's
+     * recognisable character. Output is normalised to roughly ±1.
+     */
     private fun waveform(phase: Double, midiProgram: Int): Double {
         val p = phase % (2 * PI)
         return when (midiProgram) {
-            in 16..23 -> // Organ: square wave
-                if (p < PI) 0.6 else -0.6
-            in 24..39 -> // Guitar/Bass: plucked (sine + 2nd harmonic)
-                0.6 * sin(p) + 0.3 * sin(2 * p) + 0.1 * sin(3 * p)
-            in 40..55 -> { // Strings: sawtooth
-                val t = p / (2 * PI)
-                (2.0 * t - 1.0) * 0.7
+            in 16..23 -> // Organ: additive drawbars (rich, warm, hollow)
+                (sin(p) + 0.5 * sin(2 * p) + 0.35 * sin(3 * p) + 0.25 * sin(4 * p) +
+                    0.2 * sin(6 * p) + 0.15 * sin(8 * p)) * 0.5
+            in 24..39 -> { // Guitar/Bass: plucked — bright onset that mellows
+                val decay = exp(-1.2 * (p / (2 * PI)))
+                (sin(p) + 0.45 * decay * sin(2 * p) + 0.28 * decay * sin(3 * p) +
+                    0.16 * decay * sin(4 * p) + 0.08 * decay * sin(5 * p)) * 0.62
             }
-            in 56..63 -> // Brass: bright (sine + harmonics)
-                0.5 * sin(p) + 0.25 * sin(2 * p) + 0.15 * sin(3 * p) + 0.1 * sin(4 * p)
-            in 64..79 -> { // Reed/Pipe: triangle wave
-                val t = p / (2 * PI)
-                (2.0 * abs(2.0 * t - 1.0) - 1.0) * 0.7
-            }
-            in 80..95 -> // Synth lead: pulse wave (narrow square)
-                if (p < PI * 0.7) 0.6 else -0.6
-            else -> // Piano/default: sine wave
-                sin(p)
+            in 40..55 -> // Strings: band-limited sawtooth (warm bowed buzz)
+                (sin(p) + 0.5 * sin(2 * p) + 0.33 * sin(3 * p) + 0.25 * sin(4 * p) +
+                    0.2 * sin(5 * p) + 0.16 * sin(6 * p) + 0.14 * sin(7 * p)) * 0.42
+            in 56..63 -> // Brass: bright, formant-forward stack
+                (sin(p) + 0.6 * sin(2 * p) + 0.45 * sin(3 * p) + 0.3 * sin(4 * p) +
+                    0.18 * sin(5 * p)) * 0.45
+            in 64..79 -> // Reed/Pipe: soft, mostly odd harmonics (clarinet-like)
+                (sin(p) + 0.22 * sin(3 * p) + 0.12 * sin(5 * p) + 0.06 * sin(7 * p)) * 0.78
+            in 80..95 -> // Synth lead: band-limited pulse (hollow chip buzz)
+                (sin(p) + 0.45 * sin(3 * p) + 0.3 * sin(5 * p) + 0.22 * sin(7 * p) +
+                    0.16 * sin(9 * p)) * 0.5
+            else -> // Piano/default: sine with a little body and shimmer
+                (sin(p) + 0.18 * sin(2 * p) + 0.08 * sin(3 * p)) * 0.85
         }
     }
 
@@ -517,14 +539,14 @@ class RingtoneGenerator @Inject constructor() {
     )
 
     /** Plays a full profile preview (chooses MIDI vs PCM and applies all params). */
-    fun preview(context: Context, profile: RingtoneProfile) {
+    fun preview(context: Context, profile: RingtoneProfile, onComplete: () -> Unit = {}) {
         val tempos = temposFor(profile)
         val gate = Articulations.gateForId(profile.articulation)
         val harmony = Harmonies.intervalForId(profile.harmony)
         if (profile.format.equals("midi", ignoreCase = true)) {
-            previewMidi(context, profile.notes, profile.midiProgram, tempos, gate, harmony)
+            previewMidi(context, profile.notes, profile.midiProgram, tempos, gate, harmony, onComplete)
         } else {
-            previewPlay(profile.notes, profile.midiProgram, tempos, gate, harmony)
+            previewPlay(profile.notes, profile.midiProgram, tempos, gate, harmony, onComplete)
         }
     }
 
@@ -533,7 +555,8 @@ class RingtoneGenerator @Inject constructor() {
         midiProgram: Int = 0,
         tempos: List<Int> = List(notes.size) { Tempo.DEFAULT_BPM },
         articulationGate: Double = 0.9,
-        harmonyInterval: Int? = null
+        harmonyInterval: Int? = null,
+        onComplete: () -> Unit = {}
     ) {
         stopPreview()
         val pcm = generatePcm(notes, midiProgram, tempos, articulationGate, harmonyInterval)
@@ -557,7 +580,22 @@ class RingtoneGenerator @Inject constructor() {
             .setTransferMode(AudioTrack.MODE_STATIC)
             .build()
         audioTrack = track
+        // Notify when playback reaches the end so the UI can reset to a "play" state.
+        val totalFrames = pcm.size / 2 // 16-bit mono
+        track.setPlaybackPositionUpdateListener(
+            object : AudioTrack.OnPlaybackPositionUpdateListener {
+                override fun onMarkerReached(t: AudioTrack?) {
+                    if (audioTrack === track) {
+                        stopPreview()
+                        onComplete()
+                    }
+                }
+                override fun onPeriodicNotification(t: AudioTrack?) {}
+            },
+            mainHandler
+        )
         track.write(pcm, 0, pcm.size)
+        track.setNotificationMarkerPosition(totalFrames)
         track.play()
     }
 
@@ -567,7 +605,8 @@ class RingtoneGenerator @Inject constructor() {
         midiProgram: Int = 0,
         tempos: List<Int> = List(notes.size) { Tempo.DEFAULT_BPM },
         articulationGate: Double = 0.9,
-        harmonyInterval: Int? = null
+        harmonyInterval: Int? = null,
+        onComplete: () -> Unit = {}
     ) {
         stopPreview()
         try {
@@ -579,6 +618,8 @@ class RingtoneGenerator @Inject constructor() {
             player.setOnCompletionListener {
                 try { it.release() } catch (_: Exception) {}
                 tempFile.delete()
+                if (mediaPlayer === it) mediaPlayer = null
+                onComplete()
             }
             player.setOnErrorListener { mp, _, _ ->
                 try { mp.release() } catch (_: Exception) {}
@@ -590,7 +631,7 @@ class RingtoneGenerator @Inject constructor() {
             mediaPlayer = player
         } catch (_: Exception) {
             // Fallback to PCM preview if MIDI playback fails
-            previewPlay(notes, midiProgram, tempos, articulationGate, harmonyInterval)
+            previewPlay(notes, midiProgram, tempos, articulationGate, harmonyInterval, onComplete)
         }
     }
 

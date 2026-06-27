@@ -13,9 +13,11 @@ import com.example.ringtoneid.domain.repository.ContactsRepository
 import com.example.ringtoneid.domain.repository.RingtoneRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -79,20 +81,26 @@ class ContactListViewModel @Inject constructor(
                     } catch (_: Exception) {}
                 }
                 _bulkActionState.value = BulkActionState.Idle
-                loadContacts()
             } catch (_: Exception) {}
         }
     }
 
+    /**
+     * Continuously observes contacts joined with their saved-ringtone state, so a tone
+     * saved anywhere (detail screen, bulk action, background sync) immediately reflects
+     * in the list as "has ringtone" without needing a manual refresh.
+     */
+    private var contactsJob: Job? = null
+
     fun loadContacts() {
-        viewModelScope.launch {
-            _uiState.value = ContactListUiState.Loading
-            try {
-                val contacts = getContactsUseCase().first()
-                _uiState.value = ContactListUiState.Success(contacts)
-            } catch (e: Exception) {
-                _uiState.value = ContactListUiState.Error(e.message ?: "Unknown error")
+        contactsJob?.cancel()
+        contactsJob = viewModelScope.launch {
+            if (_uiState.value !is ContactListUiState.Success) {
+                _uiState.value = ContactListUiState.Loading
             }
+            getContactsUseCase()
+                .catch { e -> _uiState.value = ContactListUiState.Error(e.message ?: "Unknown error") }
+                .collect { contacts -> _uiState.value = ContactListUiState.Success(contacts) }
         }
     }
 
@@ -116,7 +124,6 @@ class ContactListViewModel @Inject constructor(
                 }
             }
             _bulkActionState.value = BulkActionState.Idle
-            loadContacts()
         }
     }
 
@@ -143,7 +150,6 @@ class ContactListViewModel @Inject constructor(
                 }
             }
             _bulkActionState.value = BulkActionState.Idle
-            loadContacts()
         }
     }
 
@@ -160,7 +166,9 @@ class ContactListViewModel @Inject constructor(
                 _playingContactId.value = null
                 return@launch
             }
-            ringtoneGenerator.preview(context, profile)
+            ringtoneGenerator.preview(context, profile) {
+                if (_playingContactId.value == contact.id) _playingContactId.value = null
+            }
             _playingContactId.value = contact.id
         }
     }
@@ -193,7 +201,6 @@ class ContactListViewModel @Inject constructor(
                 }
             } catch (_: Exception) {}
             _bulkActionState.value = BulkActionState.Idle
-            loadContacts()
         }
     }
 

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -22,8 +24,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.ringtoneid.audio.Articulations
 import com.example.ringtoneid.audio.AudioOutputFormat
@@ -118,7 +122,24 @@ fun GenerationControls(
         }
 
         Spacer(Modifier.height(12.dp))
-        SectionLabel("Length: ${settings.length} notes")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Length (notes)",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f)
+            )
+            NumberField(
+                value = settings.length,
+                range = 4..16,
+                onValue = onLength,
+                modifier = Modifier.width(96.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
         Slider(
             value = settings.length.toFloat(),
             onValueChange = { onLength(it.roundToInt()) },
@@ -198,10 +219,23 @@ fun GenerationControls(
         )
         Row(
             Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("${Tempo.MIN_BPM} (slow)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("${Tempo.MAX_BPM} (fast)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            NumberField(
+                value = settings.tempoMin,
+                range = Tempo.MIN_BPM..settings.tempoMax,
+                onValue = { onTempoRange(it, settings.tempoMax) },
+                label = "Min BPM",
+                modifier = Modifier.weight(1f)
+            )
+            NumberField(
+                value = settings.tempoMax,
+                range = settings.tempoMin..Tempo.MAX_BPM,
+                onValue = { onTempoRange(settings.tempoMin, it) },
+                label = "Max BPM",
+                modifier = Modifier.weight(1f)
+            )
         }
 
         Spacer(Modifier.height(12.dp))
@@ -338,6 +372,29 @@ private fun SectionLabel(text: String) {
         fontWeight = FontWeight.Bold
     )
     Spacer(Modifier.height(4.dp))
+}
+
+/** Compact numeric entry kept in sync with an external Int value, coerced to [range]. */
+@Composable
+private fun NumberField(
+    value: Int,
+    range: IntRange,
+    onValue: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String? = null
+) {
+    var text by remember(value) { mutableStateOf(value.toString()) }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { raw ->
+            text = raw.filter { it.isDigit() }.take(4)
+            text.toIntOrNull()?.let { onValue(it.coerceIn(range.first, range.last)) }
+        },
+        label = label?.let { { Text(it) } },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier
+    )
 }
 
 @Composable

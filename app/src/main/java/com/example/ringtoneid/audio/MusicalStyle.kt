@@ -102,8 +102,10 @@ object TempoContours {
     val STEADY = NamedOption("steady", "Steady", "One constant tempo (midpoint of range)")
     val ACCELERATE = NamedOption("accelerate", "Speed up", "Glides from low to high BPM")
     val DECELERATE = NamedOption("decelerate", "Slow down", "Glides from high to low BPM")
+    val WAVE = NamedOption("wave", "Wave", "Smoothly breathes up and down (sine)")
+    val SWING = NamedOption("swing", "Swing", "Alternates slow/fast for a galloping groove")
     val RANDOM = NamedOption("random", "Random", "Each note a random tempo in range")
-    val ALL = listOf(STEADY, ACCELERATE, DECELERATE, RANDOM)
+    val ALL = listOf(STEADY, ACCELERATE, DECELERATE, WAVE, SWING, RANDOM)
     val DEFAULT = STEADY
     fun fromId(id: String?): NamedOption = ALL.find { it.id == id } ?: DEFAULT
 }
@@ -175,7 +177,7 @@ object MotifRepeat {
 
 /** Factory defaults — the single source of truth for "reset to defaults" and indicators. */
 object RingtoneDefaults {
-    const val FORMAT = "wav"
+    const val FORMAT = "midi"
     const val INSTRUMENT = 0
     const val LENGTH = 8
     const val STYLE = "major"
