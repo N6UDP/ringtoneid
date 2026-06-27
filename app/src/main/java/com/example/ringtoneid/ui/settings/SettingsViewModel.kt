@@ -38,7 +38,12 @@ data class SettingsUiState(
     val generateOnLaunch: Boolean = false,
     val backgroundSync: Boolean = false,
     val syncInterval: String = "daily",
-    val isSampling: Boolean = false,
+    /**
+     * Identifies which row is currently auditioning a sample, or null. Pool presets use
+     * their preset id; starter styles use a "builtin:<name>" key. Lets each row's button
+     * toggle play/stop independently.
+     */
+    val samplingId: String? = null,
     val isLoading: Boolean = true
 ) {
     val editingPreset: GenerationPreset?
@@ -54,7 +59,7 @@ class SettingsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val prefs = context.getSharedPreferences("ringtone_id_prefs", Context.MODE_PRIVATE)
-    private var sampling = false
+    private var samplingId: String? = null
 
     private val _settings = MutableStateFlow(loadSettings())
 
@@ -70,7 +75,7 @@ class SettingsViewModel @Inject constructor(
         generateOnLaunch = prefs.getBoolean("generate_on_launch", false),
         backgroundSync = prefs.getBoolean("background_sync", false),
         syncInterval = prefs.getString("sync_interval", "daily") ?: "daily",
-        isSampling = sampling,
+        samplingId = samplingId,
         isLoading = false
     )
 
@@ -207,31 +212,45 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { ringtoneRepository.deleteRingtone(profileId) }
     }
 
-    /** Plays a sample using the edited preset's settings (or the first preset / factory). */
-    fun playSample() {
+    /** Stable sampling key for a starter style (built-ins have no persistent id). */
+    private fun builtInKey(builtIn: BuiltInPreset) = "builtin:${builtIn.name}"
+
+    /** Render a short sample of the given settings and track which row is playing. */
+    private fun startSample(settings: GenerationSettings, id: String) {
         ringtoneGenerator.stopPreview()
         val seed = (System.currentTimeMillis() % 10000).toInt()
-        val settings = sampleSettings()
         val sampleContact = Contact(id = -1L, name = "Sample", phoneNumber = "5551234567")
         val profile = generateRingtoneUseCase.from(sampleContact, settings, seed)
-        sampling = true
-        _settings.value = _settings.value.copy(isSampling = true)
+        samplingId = id
+        _settings.value = _settings.value.copy(samplingId = id)
         ringtoneGenerator.preview(context, profile) {
-            sampling = false
-            _settings.value = _settings.value.copy(isSampling = false)
+            if (samplingId == id) {
+                samplingId = null
+                _settings.value = _settings.value.copy(samplingId = null)
+            }
         }
     }
 
-    private fun sampleSettings(): GenerationSettings {
-        val st = _settings.value
-        val preset = st.editingPreset ?: st.presets.firstOrNull()
-        return preset?.settings ?: GenerationSettings.FACTORY
+    /** Toggle a sample for a pool preset (its id keys the playing state). */
+    fun toggleSamplePreset(id: String) {
+        if (samplingId == id) {
+            stopSample()
+        } else {
+            val preset = _settings.value.presets.find { it.id == id } ?: return
+            startSample(preset.settings, id)
+        }
+    }
+
+    /** Toggle a sample for a starter style. */
+    fun toggleSampleBuiltIn(builtIn: BuiltInPreset) {
+        val key = builtInKey(builtIn)
+        if (samplingId == key) stopSample() else startSample(builtIn.settings, key)
     }
 
     fun stopSample() {
         ringtoneGenerator.stopPreview()
-        sampling = false
-        _settings.value = _settings.value.copy(isSampling = false)
+        samplingId = null
+        _settings.value = _settings.value.copy(samplingId = null)
     }
 
     override fun onCleared() {

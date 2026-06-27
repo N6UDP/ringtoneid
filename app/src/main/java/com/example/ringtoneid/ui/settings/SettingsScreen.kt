@@ -20,6 +20,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -100,7 +102,7 @@ fun SettingsScreen(
                 PresetItem(
                     preset = preset,
                     expanded = uiState.editingPresetId == preset.id,
-                    isSampling = uiState.isSampling,
+                    samplingId = uiState.samplingId,
                     canDelete = uiState.presets.size > 1,
                     viewModel = viewModel
                 )
@@ -140,16 +142,26 @@ fun SettingsScreen(
             }
 
             items(BuiltInPresets.ALL, key = { it.name }) { builtIn ->
+                val builtInPlaying = uiState.samplingId == "builtin:${builtIn.name}"
                 ListItem(
                     headlineContent = { Text(builtIn.name, fontWeight = FontWeight.SemiBold) },
                     supportingContent = {
                         Text(builtIn.description, style = MaterialTheme.typography.bodySmall)
                     },
                     trailingContent = {
-                        TextButton(onClick = { viewModel.addBuiltIn(builtIn) }) {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                            Spacer(Modifier.width(4.dp))
-                            Text("Add")
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { viewModel.toggleSampleBuiltIn(builtIn) }) {
+                                Icon(
+                                    if (builtInPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = if (builtInPlaying) "Stop preview" else "Preview",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            TextButton(onClick = { viewModel.addBuiltIn(builtIn) }) {
+                                Icon(Icons.Default.Add, contentDescription = null)
+                                Spacer(Modifier.width(4.dp))
+                                Text("Add")
+                            }
                         }
                     }
                 )
@@ -307,10 +319,11 @@ fun SettingsScreen(
 private fun PresetItem(
     preset: GenerationPreset,
     expanded: Boolean,
-    isSampling: Boolean,
+    samplingId: String?,
     canDelete: Boolean,
     viewModel: SettingsViewModel
 ) {
+    val isSampling = samplingId == preset.id
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -334,6 +347,13 @@ private fun PresetItem(
                     "Weight ${preset.weight}" + if (!preset.enabled) " · disabled" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(onClick = { viewModel.toggleSamplePreset(preset.id) }) {
+                Icon(
+                    if (isSampling) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isSampling) "Stop preview" else "Preview",
+                    tint = MaterialTheme.colorScheme.primary
                 )
             }
             Icon(
@@ -386,9 +406,7 @@ private fun PresetItem(
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
-                        onClick = {
-                            if (isSampling) viewModel.stopSample() else viewModel.playSample()
-                        }
+                        onClick = { viewModel.toggleSamplePreset(preset.id) }
                     ) {
                         Text(if (isSampling) "⏹ Stop" else "▶ Sample")
                     }
