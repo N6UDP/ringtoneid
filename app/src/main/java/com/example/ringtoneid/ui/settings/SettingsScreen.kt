@@ -288,7 +288,7 @@ fun SettingsScreen(
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Ringtone ID", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Text("Version 1.0", style = MaterialTheme.typography.bodySmall)
+                        Text("Version 1.2", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Generates unique personalized ringtones for your contacts based on their phone numbers — inspired by the classic LG Ringtone ID feature.",
