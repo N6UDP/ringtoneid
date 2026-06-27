@@ -2,6 +2,16 @@
 
 All notable changes to Ringtone ID are documented here.
 
+## [1.2.1] — 2026-06-26
+
+### Added
+- **Preview buttons** on every starter style and pool preset, so you can audition a
+  tune without expanding or adding it first.
+
+### Fixed
+- Adding a preset (manually, by duplicating, or from a starter style) now scrolls it
+  into view so it's clear it was added.
+
 ## [1.2] — 2026-06-26
 
 ### Added

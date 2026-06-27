@@ -35,6 +35,11 @@ data class SettingsUiState(
     val presets: List<GenerationPreset> = emptyList(),
     /** Id of the preset whose generation controls are expanded for editing, or null. */
     val editingPresetId: String? = null,
+    /**
+     * One-shot signal: id of a just-added preset the UI should scroll into view, or null.
+     * Cleared via [SettingsViewModel.onScrolledToPreset] once consumed.
+     */
+    val scrollToPresetId: String? = null,
     val generateOnLaunch: Boolean = false,
     val backgroundSync: Boolean = false,
     val syncInterval: String = "daily",
@@ -95,7 +100,7 @@ class SettingsViewModel @Inject constructor(
             settings = GenerationSettings.FACTORY
         )
         persist(list + preset)
-        _settings.value = _settings.value.copy(editingPresetId = preset.id)
+        _settings.value = _settings.value.copy(editingPresetId = preset.id, scrollToPresetId = preset.id)
     }
 
     fun duplicatePreset(id: String) {
@@ -107,14 +112,21 @@ class SettingsViewModel @Inject constructor(
             settings = source.settings
         )
         persist(_settings.value.presets + copy)
-        _settings.value = _settings.value.copy(editingPresetId = copy.id)
+        _settings.value = _settings.value.copy(editingPresetId = copy.id, scrollToPresetId = copy.id)
     }
 
     /** Add a curated genre starter into the pool and open it for tweaking. */
     fun addBuiltIn(builtIn: BuiltInPreset) {
         val preset = GenerationPreset(name = builtIn.name, settings = builtIn.settings)
         persist(_settings.value.presets + preset)
-        _settings.value = _settings.value.copy(editingPresetId = preset.id)
+        _settings.value = _settings.value.copy(editingPresetId = preset.id, scrollToPresetId = preset.id)
+    }
+
+    /** Clears the scroll-to signal once the UI has scrolled the new preset into view. */
+    fun onScrolledToPreset() {
+        if (_settings.value.scrollToPresetId != null) {
+            _settings.value = _settings.value.copy(scrollToPresetId = null)
+        }
     }
 
     fun deletePreset(id: String) {

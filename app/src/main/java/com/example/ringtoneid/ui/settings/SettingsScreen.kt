@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -43,6 +44,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -61,6 +63,17 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val listState = rememberLazyListState()
+
+    // When a preset is added (manually, duplicated, or from a starter style) scroll it
+    // into view so it's obvious it landed in the pool. Presets occupy LazyColumn indices
+    // 1..N (index 0 is the section header).
+    LaunchedEffect(uiState.scrollToPresetId) {
+        val id = uiState.scrollToPresetId ?: return@LaunchedEffect
+        val idx = uiState.presets.indexOfFirst { it.id == id }
+        if (idx >= 0) listState.animateScrollToItem(idx + 1)
+        viewModel.onScrolledToPreset()
+    }
 
     Scaffold(
         topBar = {
@@ -75,6 +88,7 @@ fun SettingsScreen(
         }
     ) { paddingValues ->
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
@@ -300,7 +314,7 @@ fun SettingsScreen(
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Ringtone ID", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                        Text("Version 1.2", style = MaterialTheme.typography.bodySmall)
+                        Text("Version 1.2.1", style = MaterialTheme.typography.bodySmall)
                         Spacer(Modifier.height(8.dp))
                         Text(
                             "Generates unique personalized ringtones for your contacts based on their phone numbers — inspired by the classic LG Ringtone ID feature.",
